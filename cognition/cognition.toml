@@ -1,0 +1,33 @@
+# Cognition Node — Example Configuration
+#
+# Any key absent from this file falls back to the default defined in
+# cognition/config.py. Only override what you actually need.
+
+[llm]
+provider = "openai"
+model = "gpt-4o-mini"
+api_key = ""
+base_url = "https://api.openai.com/v1"
+temperature = 0.7
+max_history = 40
+max_iterations = 15
+
+# VertexAI only (ignored when provider = "openai")
+# vertex_project = "my-gcp-project"
+# vertex_location = "us-central1"
+
+[zmq]
+input_bind = "tcp://*:5555"
+output_bind = "tcp://*:5556"
+
+[paths]
+personality = "cognition/personality.md"
+memory = "cognition/memory/memory.md"
+expiring_notes = "cognition/memory/expiring_notes.json"
+history = "cognition/memory/history.json"
+tools = "cognition/tools"
+context_plugins = "cognition/context_plugins"
+prompts = "cognition/prompts"
+
+[behaviour]
+log_level = "INFO"

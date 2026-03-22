@@ -1,0 +1,3 @@
+pyzmq
+langchain-openai
+langchain-google-genai
