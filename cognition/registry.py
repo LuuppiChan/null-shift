@@ -205,7 +205,7 @@ class ToolRegistry:
 
         found_paths: set[Path] = set()
 
-        for py_file in sorted(plugin_dir.glob("*.py")):
+        for py_file in sorted(plugin_dir.rglob("*.py")):
             found_paths.add(py_file)
             mtime = py_file.stat().st_mtime
 

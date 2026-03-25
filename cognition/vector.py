@@ -138,7 +138,6 @@ class Vector:
         merged = BusMessage(
             topic="input.batched",
             payload={
-                "type": "instant",
                 "body": combined_body,
                 "title": "Batched Events",
             },
@@ -165,17 +164,24 @@ class Vector:
         snapshot = await self._context.assemble()
         self._history.append_system(self._prompt.build(snapshot))
 
-        text, media_parts = self._parse_event(event)
+        text, media_parts, external_tools = self._parse_event(event)
         self._history.append_user(text, media_parts or None)
         self._history.trim()
 
         full_text = ""
-        tool_schemas = self._registry.get_schemas()
+        tool_schemas = self._registry.get_schemas() + external_tools
+        
+        all_tool_calls_in_turn = []
+        final_reason = "complete"
 
         for iteration in range(self._config.llm_max_iterations):
             if self._state.is_aborting:
                 logger.info("Turn %s aborted at iteration %d.", turn_id, iteration)
+                final_reason = "ABORT_LOCAL"
                 break
+                
+            if iteration == self._config.llm_max_iterations - 1:
+                final_reason = "TOOL_LIMIT"
 
             logger.debug(
                 "LLM iteration %d / %d", iteration + 1, self._config.llm_max_iterations
@@ -187,8 +193,11 @@ class Vector:
                 self._history.to_messages(), tool_schemas
             ):
                 if self._state.is_aborting:
+                    final_reason = "ABORT_LOCAL"
                     break
                 if chunk.is_done:
+                    if chunk.finish_reason:
+                        final_reason = chunk.finish_reason
                     break
 
                 if chunk.delta_text:
@@ -203,6 +212,7 @@ class Vector:
                     got_tool_call = True
                     tc = chunk.tool_call
                     logger.info("Tool call: %s(%s)", tc.name, tc.args)
+                    all_tool_calls_in_turn.append({"name": tc.name, "args": tc.args})
 
                     spoken_with_tool = delta_accumulator.strip() or None
                     delta_accumulator = ""
@@ -222,6 +232,9 @@ class Vector:
             if delta_accumulator:
                 self._history.append_assistant(delta_accumulator)
 
+            if final_reason in ("ABORT_LOCAL", "TOOL_LIMIT"):
+                break
+                
             if not got_tool_call:
                 break
 
@@ -229,8 +242,9 @@ class Vector:
             _TOPIC_DONE,
             {
                 "turn_id": turn_id,
-                "reason": "abort" if self._state.is_aborting else "complete",
+                "reason": final_reason,
                 "full_text": full_text,
+                "tool_calls": all_tool_calls_in_turn,
             },
         )
         await self._history.save()
@@ -285,32 +299,27 @@ class Vector:
     # Input parsing
     # ------------------------------------------------------------------
 
-    def _parse_event(self, event: BusMessage) -> tuple[str, list[dict] | None]:
-        """Convert a raw bus event to (text, media_parts).
-
-        Preserves the V1 socket protocol (``user``, ``instant``, ``batched``).
+    def _parse_event(self, event: BusMessage) -> tuple[str, list[dict] | None, list[dict]]:
+        """Convert a raw bus event to text, media, and external tools.
 
         Args:
             event: Inbound bus message.
 
         Returns:
-            tuple: ``(text, media_parts)``; ``media_parts`` is ``None`` if
-            no multimodal content was attached.
+            tuple: ``(text, media_parts, external_tools)``
         """
         payload = event.payload
-        msg_type = payload.get("type", "user")
         body: str = payload.get("body", "")
         title: str = payload.get("title", "")
         content: list[dict] | None = payload.get("content")
+        external_tools: list[dict] = payload.get("tools", [])
 
-        if msg_type == "instant":
-            text = f"# {title}\n{body}" if title else body
-        elif msg_type == "batched":
+        if event.topic in ("input.instant", "input.batched"):
             text = f"# {title}\n{body}" if title else body
         else:
             text = body
 
-        return text, content
+        return text, content, external_tools
 
     # ------------------------------------------------------------------
     # State publication

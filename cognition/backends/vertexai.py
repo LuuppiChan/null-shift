@@ -63,10 +63,24 @@ class VertexAIBackend(LLMBackend):
                     lc_messages.append(HumanMessage(content=content))
 
         llm = self._llm.bind_tools(tools) if tools else self._llm
+        
+        finish_reason = None
 
         async for chunk in llm.astream(lc_messages):
             if not isinstance(chunk, AIMessageChunk):
                 continue
+                
+            if chunk.response_metadata and chunk.response_metadata.get("finish_reason"):
+                raw_reason = str(chunk.response_metadata.get("finish_reason")).upper()
+                if "STOP" in raw_reason:
+                    finish_reason = "STOP"
+                elif "TOOL_CALL" in raw_reason or "FUNCTION_CALL" in raw_reason:
+                    finish_reason = "TOOL_CALL"
+                elif "MAX_TOKENS" in raw_reason or "LENGTH" in raw_reason:
+                    finish_reason = "LENGTH"
+                else:
+                    finish_reason = raw_reason
+
             if chunk.content and isinstance(chunk.content, str):
                 yield StreamChunk(delta_text=chunk.content)
             for tc in getattr(chunk, "tool_calls", []):
@@ -78,4 +92,4 @@ class VertexAIBackend(LLMBackend):
                     )
                 )
 
-        yield StreamChunk(is_done=True)
+        yield StreamChunk(is_done=True, finish_reason=finish_reason)

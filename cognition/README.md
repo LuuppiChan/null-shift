@@ -173,28 +173,18 @@ Frame 2: payload (UTF-8 JSON)
 
 | Topic | Payload | Effect |
 |---|---|---|
-| `input.user` | `{type, body, title?, content?}` | Immediate user turn |
-| `input.instant` | `{type, body, title?, content?}` | Immediate system event turn |
-| `input.batched` | `{type, body, title?, content?}` | Queued for later batch dispatch |
-| `input.abort` | `{}` | Aborts the current turn |
-| `input.command` | `{cmd: "dispatch_batched"}` | Flush and process batched queue |
-| `action.result` | `{call_id, result, error?}` | Action Node returns a tool result |
-
-#### Message Types
-
-| `type` field | Behaviour |
-|---|---|
-| `user` | Passed to the LLM as raw user input |
-| `instant` | Framed as `[{title}]\n{body}` — treated as a system event |
-| `batched` | Held in memory until `dispatch_batched` command is received |
+| `input.user` | `{body, content?}` | Immediate user turn. |
+| `input.instant` | `{body, title?, content?, tools?}` | Immediate system event turn. `title` is optional. `tools` can be an array of OpenAPI-style function schemas to dynamically inject for this turn. |
+| `input.batched` | `{body, title?, content?}` | Queued for later batch dispatch. |
+| `input.abort` | `{}` | Aborts the current turn. |
+| `input.command` | `{cmd: str, ...}` | Execute internal commands (e.g. `dispatch_batched` or `poll_state`). |
 
 #### Media Attachments
 
-Any `user` or `instant` message can carry multimodal content via a `content` array:
+Any message can carry multimodal content via a `content` array:
 
 ```json
 {
-  "type": "user",
   "body": "What do you see in this image?",
   "content": [
     {
@@ -225,13 +215,24 @@ def send(topic: str, payload: dict) -> None:
     ])
 
 # Plain text
-send("input.user", {"type": "user", "body": "What is the weather today?"})
+send("input.user", {"body": "What is the weather today?"})
 
 # System event
 send("input.instant", {
-    "type": "instant",
     "title": "Calendar",
     "body": "You have a meeting in 10 minutes."
+})
+
+# With external tools dynamically injected
+send("input.instant", {
+    "body": "What is the temperature in Helsinki?",
+    "tools": [{
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Fetch live weather for a city."
+        }
+    }]
 })
 
 # With image
@@ -239,7 +240,6 @@ with open("screenshot.png", "rb") as f:
     data = base64.b64encode(f.read()).decode()
 
 send("input.user", {
-    "type": "user",
     "body": "Describe this screenshot.",
     "content": [{"mime_type": "image/png", "data": data}]
 })
@@ -259,11 +259,11 @@ All output is **published** as two-frame multipart messages (same format as inpu
 | Topic | Payload | Description |
 |---|---|---|
 | `assistant.stream` | `{chunk: str, turn_id: str}` | Incremental LLM token |
-| `assistant.stream.done` | `{turn_id, reason, full_text}` | Turn complete |
+| `assistant.stream.done` | `{turn_id, reason, full_text, tool_calls}` | Turn complete |
 | `state.changed` | See [Runtime State](#runtime-state) | Any state field changed |
 | `action.request` | `{call_id, tool, args, turn_id}` | Tool call for Action Node |
 
-`reason` in `stream.done` is either `"complete"` or `"abort"`.
+`reason` in `stream.done` will be the upstream API stop reason (`STOP`, `TOOL_CALL`, `LENGTH`), or a local orchestrator reason (`ABORT_LOCAL`, `TOOL_LIMIT`). `tool_calls` is a list of all tools executed during that turn.
 
 #### Python Subscriber Example
 
@@ -520,6 +520,19 @@ State is **event-driven**. Whenever a field changes, Cognition publishes `state.
 | `is_aborting` | `bool` | `True` if an abort was requested |
 | `tool_active` | `str \| null` | Name of the tool currently executing |
 | `at_finished` | `float` | Unix timestamp of the last completed turn |
+
+### State Polling
+
+While the primary pattern is subscribing to `state.changed`, you can actively request the current state on demand:
+
+```python
+send("input.command", {
+    "cmd": "poll_state",
+    "reply_topic": "my.custom.reply"  # optional, defaults to "state.reply"
+})
+```
+
+Cognition will immediately publish its full state dictionary to the specified topic on the PUB socket.
 
 ### Waiting for Idle (Agent Callback Pattern)
 

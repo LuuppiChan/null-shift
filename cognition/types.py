@@ -35,8 +35,10 @@ class StreamChunk:
             a tool call.
         tool_call: A complete tool-call request, or ``None`` for text chunks.
         is_done: ``True`` signals end of the stream.
+        finish_reason: Upstream API reason for stopping (e.g. \"STOP\", \"TOOL_CALL\").
     """
 
     delta_text: str | None = None
     tool_call: ToolCall | None = None
     is_done: bool = False
+    finish_reason: str | None = None

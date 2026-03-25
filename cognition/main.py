@@ -111,12 +111,16 @@ async def run(config: CognitionConfig) -> None:
                 cmd = event.payload.get("cmd")
                 if cmd == "dispatch_batched":
                     await input_queue.put(event)
+                elif cmd == "poll_state":
+                    reply_topic = event.payload.get("reply_topic", "state.reply")
+                    state_dict = vector._state._to_dict()
+                    await bus.publish(reply_topic, state_dict)
                 else:
                     logger.warning("Unknown command: %r", cmd)
                 continue
 
             # Batched input — enqueue body for later dispatch.
-            if event.payload.get("type") == "batched":
+            if topic == "input.batched":
                 vector.enqueue_batched(event)
                 continue
 

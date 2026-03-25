@@ -103,9 +103,13 @@ class OpenAIBackend(LLMBackend):
         llm = self._llm.bind_tools(tools) if tools else self._llm
         accumulated_tool_calls: dict[str, dict] = {}
 
+        finish_reason = None
         async for chunk in llm.astream(lc_messages):
             if not isinstance(chunk, AIMessageChunk):
                 continue
+                
+            if chunk.response_metadata and chunk.response_metadata.get("finish_reason"):
+                finish_reason = chunk.response_metadata.get("finish_reason").upper()
 
             if chunk.content and isinstance(chunk.content, str):
                 yield StreamChunk(delta_text=chunk.content)
@@ -136,5 +140,8 @@ class OpenAIBackend(LLMBackend):
                     args=args,
                 )
             )
+            
+        if finish_reason == "TOOL_CALLS":
+            finish_reason = "TOOL_CALL"
 
-        yield StreamChunk(is_done=True)
+        yield StreamChunk(is_done=True, finish_reason=finish_reason)
