@@ -1,0 +1,70 @@
+zmq_output_bind = "tcp://localhost:5556"
+
+default_tts_lang = "en"
+voice_rate = 1.0
+voice_volume = 1.0
+tts_language_detection_min_chars = 5
+
+[piper_models.en]
+model = "/home/luuppi/Documents/coding/python_projects/assistant/models/piper/en_GB-alan-low.onnx"
+config = "/home/luuppi/Documents/coding/python_projects/assistant/models/piper/en_GB-alan-low.onnx.json"
+
+[piper_models.fi]
+model = "/home/luuppi/Documents/coding/python_projects/assistant/models/piper/fi_FI-harri-medium.onnx"
+config = "/home/luuppi/Documents/coding/python_projects/assistant/models/piper/fi_FI-harri-medium.onnx.json"
+
+# Block stripping rules (for things like code markers, think blocks, etc.)
+[[cleaning_blocks]]
+name = "code"
+start_tag = "```"
+end_tag = "```"
+replacement = " [code block] "
+
+[[cleaning_blocks]]
+name = "tildes"
+start_tag = "~~~"
+end_tag = "~~~"
+replacement = " [code block] "
+
+[[cleaning_blocks]]
+name = "think"
+start_tag = "<think>"
+end_tag = "</think>"
+replacement = ""
+
+[[cleaning_blocks]]
+name = "think_bracket"
+start_tag = "[think]"
+end_tag = "[/think]"
+replacement = ""
+
+[[cleaning_blocks]]
+name = "thought_tag"
+start_tag = "<thought>"
+end_tag = "</thought>"
+replacement = ""
+
+[[cleaning_blocks]]
+name = "inner_thought_tag"
+start_tag = "<inner_thought>"
+end_tag = "</inner_thought>"
+replacement = ""
+
+[[cleaning_blocks]]
+name = "tool_call_tag"
+start_tag = "<tool_call>"
+end_tag = "</tool_call>"
+replacement = ""
+
+# Simple string to string replacements for pronunciation/stripping
+[cleaning_replacements]
+"*" = ""
+"#" = ""
+"`" = ""
+"~" = ""
+"ASMR" = "A S M R"
+"[TOOL_CALL_TRIGGERED]" = ""
+"[TOOL_CALL_FINISHED]" = ""
+"<|begin_of_box|>" = ""
+"<|end_of_box|>" = ""
+"<tool_call>" = ""

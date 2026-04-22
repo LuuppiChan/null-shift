@@ -1,0 +1,5 @@
+langdetect
+pyzmq
+pydantic
+piper-tts
+pathvalidate
