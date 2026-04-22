@@ -3,3 +3,12 @@ cognition/cognition.toml
 todo_list.md
 target/
 .venv/
+todo.md
+output.log
+test.py
+prompting_help
+core.log
+core_config.toml
+tool_config.toml
+/tools/browser_bad/
+tools.md
