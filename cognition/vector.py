@@ -16,15 +16,15 @@ import logging
 import uuid
 from typing import TYPE_CHECKING
 
-from cognition.backends import LLMBackend
-from cognition.bus import BusMessage, CognitionBus
-from cognition.config import CognitionConfig
-from cognition.context import ContextAssembler
-from cognition.history import HistoryManager
-from cognition.prompt import PromptAssembler
-from cognition.registry import ToolRegistry
-from cognition.state import RuntimeState
-from cognition.types import ToolCall
+from backends import LLMBackend, build_backend
+from bus import BusMessage, CognitionBus
+from config import CognitionConfig, load_config
+from context import ContextAssembler
+from custom_types import ToolCall
+from history import HistoryManager
+from prompt import PromptAssembler
+from registry import ToolRegistry
+from state import RuntimeState
 
 if TYPE_CHECKING:
     pass
@@ -65,7 +65,10 @@ class Vector:
         prompt: PromptAssembler,
         history: HistoryManager,
         backend: LLMBackend,
+        config_path: str | Path = "cognition/cognition.toml",
     ) -> None:
+        from pathlib import Path
+
         self._config = config
         self._bus = bus
         self._state = state
@@ -74,6 +77,11 @@ class Vector:
         self._prompt = prompt
         self._history = history
         self._backend = backend
+
+        self._config_path = Path(config_path)
+        self._config_mtime = (
+            self._config_path.stat().st_mtime if self._config_path.exists() else 0
+        )
 
         self._batched_queue: list[BusMessage] = []
         self._pending_tool_results: asyncio.Queue[BusMessage] = asyncio.Queue()
@@ -159,6 +167,7 @@ class Vector:
 
     async def _run_turn(self, event: BusMessage, turn_id: str) -> None:
         """Core turn logic: build context, stream LLM, dispatch tools."""
+        self._maybe_reload_config()
         self._registry.reload(self._config.path_tools)
 
         snapshot = await self._context.assemble()
@@ -170,7 +179,16 @@ class Vector:
 
         full_text = ""
         tool_schemas = self._registry.get_schemas() + external_tools
-        
+        logger.info(
+            "Tool schemas for turn %s: %s",
+            turn_id,
+            [
+                s.name if hasattr(s, "name") else s.get("function", {}).get("name")
+                for s in tool_schemas
+            ],
+        )
+        logger.debug("Full tool schemas: %s", tool_schemas)
+
         all_tool_calls_in_turn = []
         final_reason = "complete"
 
@@ -179,7 +197,7 @@ class Vector:
                 logger.info("Turn %s aborted at iteration %d.", turn_id, iteration)
                 final_reason = "ABORT_LOCAL"
                 break
-                
+
             if iteration == self._config.llm_max_iterations - 1:
                 final_reason = "TOOL_LIMIT"
 
@@ -189,7 +207,7 @@ class Vector:
             delta_accumulator = ""
             got_tool_call = False
 
-            async for chunk in await self._backend.stream(
+            async for chunk in self._backend.stream(
                 self._history.to_messages(), tool_schemas
             ):
                 if self._state.is_aborting:
@@ -234,7 +252,7 @@ class Vector:
 
             if final_reason in ("ABORT_LOCAL", "TOOL_LIMIT"):
                 break
-                
+
             if not got_tool_call:
                 break
 
@@ -272,7 +290,12 @@ class Vector:
 
         await self._bus.publish(
             _TOPIC_ACTION_REQ,
-            {"call_id": tc.call_id, "tool": tc.name, "args": tc.args, "turn_id": turn_id},
+            {
+                "call_id": tc.call_id,
+                "tool": tc.name,
+                "args": tc.args,
+                "turn_id": turn_id,
+            },
         )
         logger.debug("Waiting for action.result call_id=%s", tc.call_id)
 
@@ -296,10 +319,49 @@ class Vector:
                 continue
 
     # ------------------------------------------------------------------
+    # Configuration re-swapping
+    # ------------------------------------------------------------------
+
+    def _maybe_reload_config(self) -> None:
+        """Check if cognition.toml has changed on disk; reload backend if so."""
+        if not self._config_path.exists():
+            return
+
+        try:
+            mtime = self._config_path.stat().st_mtime
+        except OSError:
+            return
+
+        if mtime <= self._config_mtime:
+            return
+
+        logger.info("Configuration change detected — reloading.")
+        old_provider = self._config.llm_provider
+        old_model = self._config.llm_model
+
+        load_config(self._config_path, into=self._config)
+        self._config_mtime = mtime
+
+        if (
+            self._config.llm_provider != old_provider
+            or self._config.llm_model != old_model
+        ):
+            logger.info(
+                "Backend settings changed (%s/%s → %s/%s) — rebuilding backend.",
+                old_provider,
+                old_model,
+                self._config.llm_provider,
+                self._config.llm_model,
+            )
+            self._backend = build_backend(self._config)
+
+    # ------------------------------------------------------------------
     # Input parsing
     # ------------------------------------------------------------------
 
-    def _parse_event(self, event: BusMessage) -> tuple[str, list[dict] | None, list[dict]]:
+    def _parse_event(
+        self, event: BusMessage
+    ) -> tuple[str, list[dict] | None, list[dict]]:
         """Convert a raw bus event to text, media, and external tools.
 
         Args:

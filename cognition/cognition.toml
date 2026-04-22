@@ -7,6 +7,7 @@
 # "openai" | "vertexai"
 provider = "vertexai"
 model = "google/gemini-2.5-flash"
+# model = "gemini-2.5-flash"
 api_key = "foo"
 base_url = "http://localhost:4000/v1"
 temperature = 0.7
@@ -22,13 +23,16 @@ input_bind = "tcp://*:5555"
 output_bind = "tcp://*:5556"
 
 [paths]
-personality = "cognition/personality.md"
-memory = "cognition/memory/memory.md"
-expiring_notes = "cognition/memory/expiring_notes.json"
-history = "cognition/memory/history.json"
-tools = "cognition/tools"
-context_plugins = "cognition/context_plugins"
-prompts = "cognition/prompts"
+personality = "personality.md"
+memory = "memory/memory.md"
+expiring_notes = "memory/expiring_notes.json"
+history = "memory/history.json"
+tools = "tools"
+context_plugins = "context_plugins"
+prompts = "prompts"
 
 [behaviour]
 log_level = "INFO"
+
+[prompts]
+layout = ["personality", "prompts", "long_term", "short_term", "context"]

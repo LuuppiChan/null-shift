@@ -13,6 +13,9 @@ import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Dataclass — all defaults live here
@@ -47,6 +50,9 @@ class CognitionConfig:
     path_context_plugins: str = "cognition/context_plugins"
     path_prompts: str = "cognition/prompts"
 
+    # -- Prompts -------------------------------------------------------------
+    prompts_layout: list[str] = field(default_factory=lambda: ["personality", "prompts", "long_term", "short_term", "context"])
+
     # -- Behaviour -----------------------------------------------------------
     log_level: str = "INFO"
     agentic_intent_max_words: int = 60
@@ -63,7 +69,10 @@ class CognitionConfig:
 _KNOWN_FIELDS: frozenset[str] = frozenset(f.name for f in fields(CognitionConfig))
 
 
-def load_config(path: str | Path = "cognition/cognition.toml") -> CognitionConfig:
+def load_config(
+    path: str | Path = "cognition/cognition.toml",
+    into: CognitionConfig | None = None,
+) -> CognitionConfig:
     """Load a ``CognitionConfig`` by merging defaults with a TOML override file.
 
     The TOML file is expected to use the same flat key names as the dataclass
@@ -74,15 +83,24 @@ def load_config(path: str | Path = "cognition/cognition.toml") -> CognitionConfi
     Args:
         path: Path to the TOML configuration file. Missing file is allowed —
               the defaults are returned as-is.
+        into: Optional existing :class:`CognitionConfig` instance to update
+              in-place. If omitted, a new instance is created.
 
     Returns:
-        A fully resolved :class:`CognitionConfig` instance.
+        A fully resolved :class:`CognitionConfig` instance (either the one
+        passed as ``into`` or a new one).
     """
-    cfg = CognitionConfig()
+    cfg = into if into is not None else CognitionConfig()
     toml_path = Path(path)
 
     if not toml_path.exists():
-        return cfg
+        # Try finding it relative to this file
+        alt_path = Path(__file__).parent / "cognition.toml"
+        if alt_path.exists():
+            toml_path = alt_path
+        else:
+            logger.warning("Configuration file %s not found (tried alt: %s) — using defaults.", path, alt_path)
+            return cfg
 
     if sys.version_info < (3, 11):
         raise RuntimeError("Cognition requires Python 3.11+ for stdlib tomllib support.")
@@ -97,6 +115,7 @@ def load_config(path: str | Path = "cognition/cognition.toml") -> CognitionConfi
         "llm": "llm_",
         "zmq": "zmq_",
         "paths": "path_",
+        "prompts": "prompts_",
         "behaviour": "",
     }
 

@@ -14,12 +14,13 @@ The :func:`build_backend` factory selects the right implementation from
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, AsyncIterator
+from typing import TYPE_CHECKING, Any, AsyncIterator
 
-from cognition.types import StreamChunk
+from custom_types import StreamChunk
+from langchain_core.messages import BaseMessage
 
 if TYPE_CHECKING:
-    from cognition.config import CognitionConfig
+    from config import CognitionConfig
 
 
 class LLMBackend(ABC):
@@ -34,8 +35,8 @@ class LLMBackend(ABC):
     @abstractmethod
     async def stream(
         self,
-        messages: list[dict],
-        tools: list[dict],
+        messages: list[BaseMessage],
+        tools: list[Any],
     ) -> AsyncIterator[StreamChunk]:
         """Stream a response from the LLM.
 
@@ -63,12 +64,19 @@ def build_backend(config: CognitionConfig) -> LLMBackend:
     Raises:
         ValueError: If ``config.llm_provider`` is not a known provider.
     """
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info("Building backend for provider: %s", config.llm_provider)
+
     if config.llm_provider == "openai":
-        from cognition.backends.openai import OpenAIBackend
+        from backends.openai import OpenAIBackend
+
         return OpenAIBackend(config)
 
     if config.llm_provider == "vertexai":
-        from cognition.backends.vertexai import VertexAIBackend
+        from backends.vertexai import VertexAIBackend
+
         return VertexAIBackend(config)
 
     raise ValueError(

@@ -1,8 +1,8 @@
 """
 Conversation history manager.
 
-Stores the conversation as plain dicts (OpenAI message format) rather than
-LangChain typed objects, making the node library-agnostic.
+Stores the conversation as LangChain typed message objects (SystemMessage,
+HumanMessage, AIMessage, ToolMessage).
 
 Multimodal content is stored using the **mime_type** convention understood by
 both VertexAI and the V1 assistant. LLM backends are responsible for
@@ -24,14 +24,18 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from cognition.config import CognitionConfig
+from config import CognitionConfig
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+    message_to_dict,
+    messages_from_dict,
+)
 
 logger = logging.getLogger(__name__)
-
-_ROLE_SYSTEM = "system"
-_ROLE_USER = "user"
-_ROLE_ASSISTANT = "assistant"
-_ROLE_TOOL = "tool"
 
 
 class HistoryManager:
@@ -43,7 +47,7 @@ class HistoryManager:
 
     def __init__(self, config: CognitionConfig) -> None:
         self._config = config
-        self._messages: list[dict[str, Any]] = []
+        self._messages: list[BaseMessage] = []
 
     # ------------------------------------------------------------------
     # Append helpers
@@ -58,10 +62,10 @@ class HistoryManager:
         Args:
             text: System prompt text.
         """
-        if self._messages and self._messages[0]["role"] == _ROLE_SYSTEM:
-            self._messages[0]["content"] = text
+        if self._messages and isinstance(self._messages[0], SystemMessage):
+            self._messages[0] = SystemMessage(content=text)
         else:
-            self._messages.insert(0, {"role": _ROLE_SYSTEM, "content": text})
+            self._messages.insert(0, SystemMessage(content=text))
 
     def append_user(
         self,
@@ -91,7 +95,7 @@ class HistoryManager:
         else:
             content = text
 
-        self._messages.append({"role": _ROLE_USER, "content": content})
+        self._messages.append(HumanMessage(content=content))
 
     def append_assistant(self, text: str) -> None:
         """Append an assistant (LLM) response message.
@@ -99,7 +103,7 @@ class HistoryManager:
         Args:
             text: The full text of the assistant's response.
         """
-        self._messages.append({"role": _ROLE_ASSISTANT, "content": text})
+        self._messages.append(AIMessage(content=text))
 
     def append_tool_call(
         self,
@@ -122,20 +126,16 @@ class HistoryManager:
             content: Optional text content spoken alongside the tool call.
         """
         self._messages.append(
-            {
-                "role": _ROLE_ASSISTANT,
-                "content": content,
-                "tool_calls": [
+            AIMessage(
+                content=content or "",
+                tool_calls=[
                     {
                         "id": call_id,
-                        "type": "function",
-                        "function": {
-                            "name": name,
-                            "arguments": json.dumps(args, ensure_ascii=False),
-                        },
+                        "name": name,
+                        "args": args,
                     }
                 ],
-            }
+            )
         )
 
     def append_tool_result(self, call_id: str, result: str) -> None:
@@ -146,11 +146,10 @@ class HistoryManager:
             result: String result returned by the tool or Action Node.
         """
         self._messages.append(
-            {
-                "role": _ROLE_TOOL,
-                "tool_call_id": call_id,
-                "content": result,
-            }
+            ToolMessage(
+                tool_call_id=call_id,
+                content=result,
+            )
         )
 
     # ------------------------------------------------------------------
@@ -169,7 +168,7 @@ class HistoryManager:
 
         system_msg = (
             self._messages[0]
-            if self._messages and self._messages[0]["role"] == _ROLE_SYSTEM
+            if self._messages and isinstance(self._messages[0], SystemMessage)
             else None
         )
         rest = self._messages[1:] if system_msg else list(self._messages)
@@ -179,8 +178,12 @@ class HistoryManager:
 
         while cutoff < len(rest):
             msg = rest[cutoff]
-            is_tool_result = msg.get("role") == _ROLE_TOOL
-            prev_has_tool_call = cutoff > 0 and rest[cutoff - 1].get("tool_calls")
+            is_tool_result = isinstance(msg, ToolMessage)
+            prev_has_tool_call = (
+                cutoff > 0
+                and isinstance(rest[cutoff - 1], AIMessage)
+                and rest[cutoff - 1].tool_calls
+            )
             if is_tool_result or prev_has_tool_call:
                 cutoff += 1
             else:
@@ -200,13 +203,13 @@ class HistoryManager:
         if not self._messages:
             return
 
-        sanitized: list[dict] = []
+        sanitized: list[BaseMessage] = []
         for i, msg in enumerate(self._messages):
             if i == 0:
                 sanitized.append(msg)
                 continue
 
-            if msg.get("role") == _ROLE_SYSTEM:
+            if isinstance(msg, SystemMessage):
                 logger.debug("Dropping mid-history system message at index %d.", i)
                 continue
 
@@ -214,8 +217,8 @@ class HistoryManager:
 
             if (
                 prev
-                and msg.get("role") == _ROLE_USER
-                and prev.get("role") == _ROLE_USER
+                and isinstance(msg, HumanMessage)
+                and isinstance(prev, HumanMessage)
             ):
                 logger.debug("Merging consecutive user messages at index %d.", i)
                 sanitized[-1] = msg
@@ -223,14 +226,13 @@ class HistoryManager:
 
             sanitized.append(msg)
 
-        system_end = 1 if (sanitized and sanitized[0]["role"] == _ROLE_SYSTEM) else 0
-        while (
-            len(sanitized) > system_end
-            and sanitized[system_end].get("role") != _ROLE_USER
+        system_end = 1 if (sanitized and isinstance(sanitized[0], SystemMessage)) else 0
+        while len(sanitized) > system_end and not isinstance(
+            sanitized[system_end], HumanMessage
         ):
             logger.debug(
                 "Removing leading '%s' message to enforce system→user ordering.",
-                sanitized[system_end].get("role"),
+                sanitized[system_end].__class__.__name__,
             )
             sanitized.pop(system_end)
 
@@ -253,12 +255,14 @@ class HistoryManager:
         path = Path(self._config.path_history)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        to_save = [m for m in self._messages if m.get("role") != _ROLE_SYSTEM]
+        to_save = [m for m in self._messages if not isinstance(m, SystemMessage)]
 
         try:
             await asyncio.to_thread(
                 path.write_text,
-                json.dumps(to_save, indent=2, ensure_ascii=False),
+                json.dumps(
+                    [message_to_dict(m) for m in to_save], indent=2, ensure_ascii=False
+                ),
                 encoding="utf-8",
             )
         except OSError as exc:
@@ -276,7 +280,10 @@ class HistoryManager:
 
         try:
             raw: list[dict] = json.loads(path.read_text(encoding="utf-8"))
-            self._messages = [m for m in raw if m.get("role") != _ROLE_SYSTEM]
+
+            loaded = messages_from_dict(raw)
+
+            self._messages = [m for m in loaded if not isinstance(m, SystemMessage)]
             logger.info("Loaded %d messages from history.", len(self._messages))
         except Exception as exc:
             logger.error("Failed to load history from %s: %s", path, exc)
@@ -285,11 +292,11 @@ class HistoryManager:
     # Query
     # ------------------------------------------------------------------
 
-    def to_messages(self) -> list[dict[str, Any]]:
+    def to_messages(self) -> list[BaseMessage]:
         """Return a shallow copy of the current message list.
 
         Returns:
-            list[dict]: Messages ready to pass to an LLM backend.
+            list[BaseMessage]: Messages ready to pass to an LLM backend.
         """
         return list(self._messages)
 

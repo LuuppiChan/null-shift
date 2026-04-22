@@ -38,109 +38,29 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def tool(func: Callable) -> Callable:
+from langchain_core.tools import BaseTool
+from langchain_core.tools import tool as lc_tool
+from langchain_core.utils.function_calling import convert_to_openai_tool
+
+
+def tool(func: Callable) -> BaseTool:
     """Mark an async function as a registerable tool.
 
-    The function's name, docstring, and type-annotated parameters are used to
-    auto-generate an OpenAI-style JSON schema.
+    Wraps the function using LangChain's @tool decorator.
 
     Args:
         func: An async callable.
 
     Returns:
-        The original function, unchanged, with a ``_is_tool = True`` marker.
+        A LangChain BaseTool instance.
     """
     if not inspect.iscoroutinefunction(func):
         raise TypeError(f"@tool requires an async function, got: {func!r}")
-    func._is_tool = True  # type: ignore[attr-defined]
-    return func
 
-
-# ---------------------------------------------------------------------------
-# Schema builder
-# ---------------------------------------------------------------------------
-
-_PY_TO_JSON_TYPE: dict[str, str] = {
-    "str": "string",
-    "int": "integer",
-    "float": "number",
-    "bool": "boolean",
-    "list": "array",
-    "dict": "object",
-}
-
-
-def _annotation_to_schema(annotation: Any) -> dict:
-    """Convert a Python type annotation to a JSON Schema fragment.
-
-    Handles :data:`typing.Literal` annotations by emitting an ``enum``
-    constraint in addition to the base type.
-
-    Args:
-        annotation: A Python type annotation object.
-
-    Returns:
-        dict: A JSON Schema fragment (e.g. ``{"type": "string"}`` or
-        ``{"type": "string", "enum": ["fast", "slow"]}``)
-    """
-    origin = getattr(annotation, "__origin__", None)
-
-    # typing.Literal["a", "b"] → {"type": "string", "enum": ["a", "b"]}
-    if origin is typing.Literal:
-        args = annotation.__args__
-        first = args[0] if args else ""
-        if isinstance(first, bool):
-            base_type = "boolean"
-        elif isinstance(first, int):
-            base_type = "integer"
-        elif isinstance(first, float):
-            base_type = "number"
-        else:
-            base_type = "string"
-        return {"type": base_type, "enum": list(args)}
-
-    # Fall back to simple name-based lookup.
-    type_name = getattr(annotation, "__name__", "") or str(annotation)
-    return {"type": _PY_TO_JSON_TYPE.get(type_name, "string")}
-
-
-def _build_schema(func: Callable) -> dict:
-    """Build an OpenAI function-calling JSON schema from a function's signature.
-
-    Args:
-        func: A decorated async function.
-
-    Returns:
-        An OpenAI-compatible ``{"type": "function", "function": {...}}`` dict.
-    """
-    sig = inspect.signature(func)
-    props: dict[str, dict] = {}
-    required: list[str] = []
-
-    for name, param in sig.parameters.items():
-        if param.default is inspect.Parameter.empty:
-            annotation = param.annotation
-        else:
-            annotation = param.annotation
-
-        schema_fragment = _annotation_to_schema(annotation)
-        props[name] = schema_fragment
-
-        if param.default is inspect.Parameter.empty:
-            required.append(name)
-
-    return {
-        "type": "function",
-        "function": {
-            "name": func.__name__,
-            "description": (inspect.getdoc(func) or "").strip(),
-            "parameters": {
-                "type": "object",
-                "properties": props,
-                "required": required,
-            },
-        },
-    }
+    # Langchain's tool decorator will create a BaseTool
+    t = lc_tool(func)
+    t._is_tool = True  # type: ignore[attr-defined]
+    return t
 
 
 # ---------------------------------------------------------------------------
@@ -152,21 +72,19 @@ class ToolRegistry:
     """Registry of async tool coroutines with hot-reload support.
 
     Attributes:
-        _tools: Mapping of tool name to coroutine function.
-        _schemas: Mapping of tool name to OpenAI JSON schema dict.
+        _tools: Mapping of tool name to LangChain BaseTool.
         _plugin_mtimes: Last-modified timestamps for each loaded plugin file.
     """
 
     def __init__(self) -> None:
-        self._tools: dict[str, Callable] = {}
-        self._schemas: dict[str, dict] = {}
+        self._tools: dict[str, BaseTool] = {}
         self._plugin_mtimes: dict[Path, float] = {}
 
     # ------------------------------------------------------------------
     # Static registration
     # ------------------------------------------------------------------
 
-    def register(self, func: Callable) -> Callable:
+    def register(self, func: BaseTool) -> BaseTool:
         """Register a function as a tool. Use as a decorator.
 
         Args:
@@ -175,15 +93,14 @@ class ToolRegistry:
         Returns:
             The original function, allowing decorator chaining.
         """
-        if not getattr(func, "_is_tool", False):
+        if not isinstance(func, BaseTool):
             logger.error(
-                "'%s' is not decorated with @tool — skipping registration.",
-                func.__name__,
+                "'%s' is not a LangChain tool — skipping registration.",
+                getattr(func, "__name__", str(func)),
             )
             return func
-        self._tools[func.__name__] = func
-        self._schemas[func.__name__] = _build_schema(func)
-        logger.debug("Registered built-in tool: %s", func.__name__)
+        self._tools[func.name] = func
+        logger.debug("Registered built-in tool: %s", func.name)
         return func
 
     # ------------------------------------------------------------------
@@ -238,36 +155,38 @@ class ToolRegistry:
 
         for attr_name in dir(module):
             func = getattr(module, attr_name)
-            if callable(func) and getattr(func, "_is_tool", False):
-                self._tools[func.__name__] = func
-                self._schemas[func.__name__] = _build_schema(func)
-                logger.info("Loaded tool '%s' from %s", func.__name__, py_file.name)
+            if isinstance(func, BaseTool):
+                self._tools[func.name] = func
+                logger.info("Loaded tool '%s' from %s", func.name, py_file.name)
 
     def _unload_plugin(self, py_file: Path) -> None:
         """Remove tools that came from a now-deleted plugin file."""
         # Re-derive tool names by checking which tools share the same module.
         prefix = f"cognition.tools._plugin_{py_file.stem}"
+
+        def _get_module(t: BaseTool) -> str:
+            if hasattr(t, "func") and hasattr(t.func, "__module__"):
+                return t.func.__module__
+            return getattr(t, "__module__", "")
+
         to_remove = [
-            name
-            for name, func in self._tools.items()
-            if getattr(func, "__module__", "") == prefix
+            name for name, func in self._tools.items() if _get_module(func) == prefix
         ]
         for name in to_remove:
             del self._tools[name]
-            del self._schemas[name]
             logger.info("Unloaded tool '%s' (plugin removed: %s)", name, py_file.name)
 
     # ------------------------------------------------------------------
     # Query & dispatch
     # ------------------------------------------------------------------
 
-    def get_schemas(self) -> list[dict]:
-        """Return all registered tool schemas in OpenAI function-calling format.
+    def get_schemas(self) -> list[BaseTool]:
+        """Return all registered tools.
 
         Returns:
-            list[dict]: A list of ``{"type": "function", "function": {...}}`` dicts.
+            list[BaseTool]: A list of LangChain BaseTool objects.
         """
-        return list(self._schemas.values())
+        return list(self._tools.values())
 
     async def call(self, name: str, args: dict[str, Any]) -> str:
         """Dispatch an async tool call by name.
@@ -285,10 +204,11 @@ class ToolRegistry:
         """
         if name not in self._tools:
             available = ", ".join(self._tools) or "(none)"
-            raise KeyError(
-                f"Unknown tool '{name}'. Available tools: {available}"
-            )
-        result = await self._tools[name](**args)
+            raise KeyError(f"Unknown tool '{name}'. Available tools: {available}")
+
+        tool_instance = self._tools[name]
+        result = await tool_instance.ainvoke(args)
+
         if isinstance(result, str):
             return result
         return json.dumps(result, ensure_ascii=False)

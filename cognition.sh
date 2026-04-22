@@ -1,5 +1,5 @@
 #!/bin/bash
 
-source ./cognition/.venv/bin/activate
-
-python -m cognition
+cd ./cognition/
+source ./.venv/bin/activate
+python main.py

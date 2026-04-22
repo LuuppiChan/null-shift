@@ -17,8 +17,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from cognition.config import CognitionConfig
-from cognition.context import ContextSnapshot
+from config import CognitionConfig
+from context import ContextSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +56,7 @@ class PromptAssembler:
         """
         path = Path(self._config.path_personality)
         if not path.exists():
-            logger.warning(
-                "Personality file not found at %s — using fallback.", path
-            )
+            logger.warning("Personality file not found at %s — using fallback.", path)
             return "You are a helpful AI assistant."
         return path.read_text(encoding="utf-8").strip()
 
@@ -88,39 +86,36 @@ class PromptAssembler:
     # ------------------------------------------------------------------
 
     def build(self, snapshot: ContextSnapshot) -> str:
-        """Assemble the full system prompt for the current turn.
-
-        The structure is::
-
-            {personality}
-
-            {module_1}
-
-            {module_2}
-            ...
-
-            # Memory
-            {snapshot.stable}
-
-            # Current Context
-            {snapshot.volatile}
+        """Assemble the full system prompt for the current turn based on config layout.
 
         Args:
-            snapshot: The :class:`~cognition.context.ContextSnapshot` for
-                this turn, produced by :class:`~cognition.context.ContextAssembler`.
-
+            snapshot: The :class:`~cognition.context.ContextSnapshot` for this turn.
         Returns:
             str: The complete system prompt string.
         """
         self.refresh()
 
-        parts: list[str] = [self._personality]
-        parts.extend(self._modules)
+        parts: list[str] = []
 
-        if snapshot.stable:
-            parts.append(f"# Memory\n{snapshot.stable}")
-
-        if snapshot.volatile:
-            parts.append(f"# Current Context\n{snapshot.volatile}")
+        for item in self._config.prompts_layout:
+            if item == "personality":
+                if self._personality:
+                    parts.append(self._personality)
+            elif item == "prompts":
+                if self._modules:
+                    parts.extend(self._modules)
+            elif item == "long_term":
+                if snapshot.long_term:
+                    parts.append(f"# Memory\n{snapshot.long_term}")
+            elif item == "short_term":
+                if snapshot.short_term:
+                    parts.append(f"# Active Constraints\n{snapshot.short_term}")
+            elif item == "context":
+                if snapshot.volatile:
+                    parts.append(f"# Current Context\n{snapshot.volatile}")
+            else:
+                logger.warning(
+                    "Unrecognized prompt layout category: %s (ignoring)", item
+                )
 
         return "\n\n".join(part for part in parts if part)

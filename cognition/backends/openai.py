@@ -14,12 +14,13 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
-from cognition.backends import LLMBackend
-from cognition.media import convert_content_list_openai
-from cognition.types import StreamChunk, ToolCall
+from backends import LLMBackend
+from custom_types import StreamChunk, ToolCall
+from langchain_core.messages import BaseMessage
+from media import convert_content_list_openai
 
 if TYPE_CHECKING:
-    from cognition.config import CognitionConfig
+    from config import CognitionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -44,70 +45,35 @@ class OpenAIBackend(LLMBackend):
 
     async def stream(
         self,
-        messages: list[dict],
-        tools: list[dict],
+        messages: list[BaseMessage],
+        tools: list[Any],
     ) -> AsyncIterator[StreamChunk]:
         from langchain_core.messages import (
-            AIMessage,
             AIMessageChunk,
             HumanMessage,
-            SystemMessage,
-            ToolMessage,
         )
 
-        lc_messages: list[Any] = []
+        lc_messages = []
         for m in messages:
-            role = m.get("role", "")
-            content = m.get("content") or ""
-
-            if role == "system":
-                lc_messages.append(SystemMessage(content=content))
-
-            elif role == "user":
-                if isinstance(content, list):
-                    lc_messages.append(
-                        HumanMessage(content=convert_content_list_openai(content))
-                    )
-                else:
-                    lc_messages.append(HumanMessage(content=content))
-
-            elif role == "assistant":
-                tc = m.get("tool_calls")
-                if tc:
-                    lc_messages.append(
-                        AIMessage(
-                            content=content or "",
-                            tool_calls=[
-                                {
-                                    "id": t["id"],
-                                    "name": t["function"]["name"],
-                                    "args": json.loads(
-                                        t["function"].get("arguments", "{}")
-                                    ),
-                                }
-                                for t in tc
-                            ],
-                        )
-                    )
-                else:
-                    lc_messages.append(AIMessage(content=content))
-
-            elif role == "tool":
+            if isinstance(m, HumanMessage) and isinstance(m.content, list):
                 lc_messages.append(
-                    ToolMessage(
-                        content=content,
-                        tool_call_id=m.get("tool_call_id", ""),
-                    )
+                    HumanMessage(content=convert_content_list_openai(m.content))
                 )
+            else:
+                lc_messages.append(m)
 
-        llm = self._llm.bind_tools(tools) if tools else self._llm
+        if tools:
+            logger.info("Binding %d tools to OpenAI LLM.", len(tools))
+            llm = self._llm.bind_tools(tools)
+        else:
+            llm = self._llm
         accumulated_tool_calls: dict[str, dict] = {}
 
         finish_reason = None
         async for chunk in llm.astream(lc_messages):
             if not isinstance(chunk, AIMessageChunk):
                 continue
-                
+
             if chunk.response_metadata and chunk.response_metadata.get("finish_reason"):
                 finish_reason = chunk.response_metadata.get("finish_reason").upper()
 
@@ -140,7 +106,7 @@ class OpenAIBackend(LLMBackend):
                     args=args,
                 )
             )
-            
+
         if finish_reason == "TOOL_CALLS":
             finish_reason = "TOOL_CALL"
 

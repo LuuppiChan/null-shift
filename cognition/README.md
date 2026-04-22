@@ -46,8 +46,8 @@ ctx = zmq.Context()
 sock = ctx.socket(zmq.PUSH)
 sock.connect("tcp://localhost:5555")
 sock.send_multipart([
-    b"input.user",
-    json.dumps({"type": "user", "body": "Hello!"}).encode()
+    b"input.instant",
+    json.dumps({"type": "instant", "body": "Hello!"}).encode()
 ])
 ```
 
@@ -64,7 +64,7 @@ cognition/
 ├── registry.py           Async hot-reload tool registry
 ├── context.py            Async hot-reload context plugins
 ├── prompt.py             System prompt assembler
-├── history.py            Plain-dict conversation history
+├── history.py            LangChain typed conversation history
 ├── vector.py             Vector orchestrator (turn loop)
 ├── types.py              ToolCall, StreamChunk dataclasses
 ├── media.py              mime_type → provider format converters
@@ -149,6 +149,9 @@ history        = "cognition/memory/history.json"
 tools          = "cognition/tools"
 context_plugins = "cognition/context_plugins"
 prompts        = "cognition/prompts"
+
+[prompts]
+layout = ["personality", "prompts", "long_term", "short_term", "context"]
 
 [behaviour]
 log_level = "INFO"   # DEBUG | INFO | WARNING | ERROR
@@ -302,13 +305,13 @@ Tools are `async` Python functions placed in `cognition/tools/`. They are **hot-
 1. The file must be in `cognition/tools/` (or the configured `path_tools`)
 2. Each tool function must be decorated with `@tool` from `cognition.registry`
 3. Tool functions must be `async def`
-4. Parameters must have type annotations — they are used to build the JSON schema
+4. Parameters must have type annotations — they are used to build the LangChain tool schema
 5. The docstring becomes the tool's description visible to the LLM
 
 ### Example: `cognition/tools/system_info.py`
 
 ```python
-from cognition.registry import tool
+from registry import tool
 import platform
 
 @tool
@@ -320,7 +323,7 @@ async def get_system_info() -> str:
 ### Example: With `Literal` parameters
 
 ```python
-from cognition.registry import tool
+from registry import tool
 from typing import Literal
 import subprocess
 
@@ -343,7 +346,7 @@ async def set_volume(
     return f"Volume {direction} by {amount}%."
 ```
 
-`Literal["up", "down", "mute"]` produces `{"type": "string", "enum": ["up", "down", "mute"]}` in the JSON schema — the LLM is constrained to those values.
+`Literal["up", "down", "mute"]` produces an enum constraint in the LangChain tool schema — the LLM is constrained to those values.
 
 ### Local vs. Action Node Tools
 
@@ -434,23 +437,30 @@ with adjusted arguments before reporting the failure to the user.
 
 ### System Prompt Structure
 
-The final system prompt sent to the LLM is assembled in this order every turn:
+The final system prompt sent to the LLM is assembled exactly in the order specified by the `[prompts] layout` list array in your `cognition.toml`. 
+
+The default layout list is `["personality", "prompts", "long_term", "short_term", "context"]`.
+
+For example, using the default list, your output will look like this:
 
 ```
 {personality.md content}
 
 {prompts/00_*.md}
-
 {prompts/10_*.md}
-
 ...
 
 # Memory
 {memory/memory.md content}
 
+# Active Constraints
+{memory/expiring_notes.json}
+
 # Current Context
-{output of all context plugins, joined by newlines}
+{output of all context plugins}
 ```
+
+If an item is missing from the list (for instance, `["personality", "prompts"]`), the underlying memory and context plugins will still run but their output will be silently dropped from the final LLM prompt.
 
 ---
 
@@ -501,7 +511,7 @@ Authentication uses Application Default Credentials (`gcloud auth application-de
 
 ```python
 if config.llm_provider == "my_provider":
-    from cognition.backends.my_provider import MyProviderBackend
+    from backends.my_provider import MyProviderBackend
     return MyProviderBackend(config)
 ```
 

@@ -8,8 +8,8 @@ two input events arrive simultaneously.
 
 Usage::
 
-    python -m cognition          # uses cognition/cognition.toml
-    python -m cognition --config /path/to/config.toml
+    python main.py          # uses cognition/cognition.toml
+    python main.py --config /path/to/config.toml
 """
 
 from __future__ import annotations
@@ -19,15 +19,15 @@ import asyncio
 import logging
 import signal
 
-from cognition.bus import BusMessage, CognitionBus
-from cognition.config import CognitionConfig, load_config
-from cognition.context import ContextAssembler
-from cognition.history import HistoryManager
-from cognition.prompt import PromptAssembler
-from cognition.registry import ToolRegistry
-from cognition.state import RuntimeState
-from cognition.backends import build_backend
-from cognition.vector import Vector
+from backends import build_backend
+from bus import BusMessage, CognitionBus
+from config import CognitionConfig, load_config
+from context import ContextAssembler
+from history import HistoryManager
+from prompt import PromptAssembler
+from registry import ToolRegistry
+from state import RuntimeState
+from vector import Vector
 
 
 def _setup_logging(level: str) -> None:
@@ -43,7 +43,7 @@ def _setup_logging(level: str) -> None:
     )
 
 
-async def run(config: CognitionConfig) -> None:
+async def run(config: CognitionConfig, config_path: str | Path) -> None:
     """Initialise all components and run the main event loop.
 
     The event loop has two concurrent coroutines:
@@ -64,7 +64,17 @@ async def run(config: CognitionConfig) -> None:
     prompt = PromptAssembler(config)
     history = HistoryManager(config)
     backend = build_backend(config)
-    vector = Vector(config, bus, state, registry, context, prompt, history, backend)
+    vector = Vector(
+        config,
+        bus,
+        state,
+        registry,
+        context,
+        prompt,
+        history,
+        backend,
+        config_path=config_path,
+    )
 
     history.load()
 
@@ -178,9 +188,10 @@ def main() -> None:
 
     config = load_config(args.config)
     _setup_logging(config.log_level)
+    logging.info("Loading config from: %s", args.config)
 
     try:
-        asyncio.run(run(config))
+        asyncio.run(run(config, args.config))
     except KeyboardInterrupt:
         pass
 

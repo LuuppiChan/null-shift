@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from cognition.config import CognitionConfig
+from config import CognitionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +45,13 @@ class ContextSnapshot:
     Attributes:
         volatile: Dynamic system state (time, window, media, etc.) built fresh
             every turn from the hot-loaded context plugins.
-        stable: Long-lived data (memory, expiring notes) that is loaded once
-            and refreshed only when the underlying files change.
+        long_term: Long-lived persistent memory data from memory.md.
+        short_term: Expiring notes and active constraints.
     """
 
     volatile: str
-    stable: str
+    long_term: str
+    short_term: str
 
 
 # ---------------------------------------------------------------------------
@@ -161,24 +162,26 @@ class ContextAssembler:
                 elif isinstance(result, str) and result.strip():
                     volatile_parts.append(result.strip())
 
-        stable = self._load_stable()
+        long_term, short_term = self._load_stable()
 
         return ContextSnapshot(
             volatile="\n".join(volatile_parts),
-            stable=stable,
+            long_term=long_term,
+            short_term=short_term,
         )
 
-    def _load_stable(self) -> str:
+    def _load_stable(self) -> tuple[str, str]:
         """Load long-lived memory and expiring notes from disk.
 
         Returns:
-            str: Formatted stable context block, or empty string if nothing found.
+            tuple[str, str]: (long_term_content, short_term_content)
         """
         import json
         import time
 
         parts: list[str] = []
         memory_path = Path(self._config.path_memory)
+        short_term = ""
 
         if memory_path.exists():
             try:
@@ -214,8 +217,8 @@ class ContextAssembler:
                     )
 
                 if active:
-                    parts.append("# Active Constraints\n" + "\n".join(active))
+                    short_term = "\n".join(active)
             except Exception as exc:
                 logger.warning("Could not read expiring notes: %s", exc)
 
-        return "\n\n".join(parts)
+        return (parts[0] if parts else "", short_term)

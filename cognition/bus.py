@@ -17,8 +17,7 @@ from typing import AsyncIterator
 
 import zmq
 import zmq.asyncio
-
-from cognition.config import CognitionConfig
+from config import CognitionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +88,9 @@ class CognitionBus:
                 continue
 
             if len(frames) != 2:
-                logger.warning("Malformed message: expected 2 frames, got %d.", len(frames))
+                logger.warning(
+                    "Malformed message: expected 2 frames, got %d.", len(frames)
+                )
                 continue
 
             topic_bytes, payload_bytes = frames
