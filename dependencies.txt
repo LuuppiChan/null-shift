@@ -1,0 +1,27 @@
+pyzmq
+langchain-openai
+langchain-google-genai
+langchain-litellm
+langchain
+pydantic
+pyzmq
+numpy
+SpeechRecognition
+thefuzz
+# pywhispercpp # the git version for vulkan support
+# Requires GGML_VULKAN=1 to be set during installation
+# GGML_VULKAN=1 pip install git+https://github.com/absadiki/pywhispercpp.git
+PyAudio
+langdetect
+piper-tts
+pathvalidate
+playwright
+
+# tools
+python-magic
+langchain-community
+opencv-python
+ddgs
+
+# cli text chat
+termcolor

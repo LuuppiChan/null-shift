@@ -1,0 +1,25 @@
+Adding context in the system message to the LLM is simple.
+
+Just make a markdown (.md) file in this folder. The system will pick it up. (Or specified file types in the config.)
+Same with python files (.py), the system will look for a function called `collect` which returns an optional str.
+
+
+Example markdown file (001_personality.md)
+```md
+# Personality
+You are a helpful assistant
+```
+
+Example python file (002_time.py)
+```py
+from typing import Optional
+from datetime import datetime
+
+def collect() -> Optional[str]:
+    """Simple example time context."""
+    return f"""# Time
+It's currently {datetime.now()}"""
+```
+
+The file contents are appended in alphabetical order.
+They are joined with 2 newlines. `"\n\n".join(parts)`
