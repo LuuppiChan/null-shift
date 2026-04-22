@@ -1,0 +1,78 @@
+zmq_target_address = "tcp://127.0.0.1:5555"
+
+stt_model_path = "/home/luuppi/Documents/coding/python_projects/assistant/models/whisper_cpp/ggml-large-v3-turbo-q5_0.bin"
+stt_threads = 12
+
+voice_pause_threshold = 1.2
+voice_phrase_time_limit = 60.0
+voice_non_speaking_duration = 1.2
+voice_ignore_list = [
+  "[blank_audio]",
+  "[sound]",
+  "[clears throat]",
+  "[audio out]",
+  "[bang]",
+  "[music playing]",
+  "[music]",
+  "[ silence ]",
+  "[inaudible]",
+  "[laughter]",
+  "[sigh]",
+  "[gasp]",
+  "[coughing]",
+  "[muted]",
+  "[beep] [beep] [beep]",
+  "[beep] [beep]",
+  "[beep]",
+  "[beeping]",
+  "[giggle]",
+  "[no audio]",
+  "[grunts]",
+  "[camera shutter clicks]",
+  "[snap]",
+  "[snorts]",
+  "[fart]",
+  "[click]",
+  "[blow]",
+  "[cough]",
+  "thanks.",
+  "okay.",
+  "welcome.",
+  "thank you.",
+  "mm-mm.",
+  "bye.",
+  "hmm.",
+  "you",
+  "thank you. thank you.",
+  "i don't know.",
+  "blah, blah.",
+  "mmm.",
+  "mmm. mmm.",
+  "mmm. mmm. mmm.",
+  "hmm. hmm.",
+  ".",
+  "(growls)",
+  "(grunting)",
+  "(growling)",
+  "(snoring)",
+  "(gasping)",
+  "(groans)",
+  "(mumbles)",
+  "(boing)",
+  "(gulping)",
+  "(popping)",
+  "(click, click)",
+  "(gulps)",
+  "*gasp*",
+  "*gunshot* thank you",
+  "*gunshot*",
+  "*mario*",
+  "*sad music*",
+  "*mimics*",
+  "*snaps*"
+]
+
+tts_vad_sensitivity = 5.0
+tts_vad_consecutive_chunks = 3
+
+log_level = "INFO"
