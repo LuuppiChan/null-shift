@@ -1,17 +1,14 @@
-import sys
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    import tomli as tomllib
+import tomllib
 
 
 @dataclass
 class AgentConfig:
     """Agent Wrapper configuration loaded dynamically from TOML."""
+
     # -- ZMQ -----------------------------------------------------------------
     zmq_core_input: str = "tcp://127.0.0.1:5555"
     zmq_core_output: str = "tcp://127.0.0.1:5556"
@@ -26,13 +23,15 @@ class AgentConfig:
     prompts_trajectory_template: str = "You are in Target Trajectory mode. Navigate to the target using tools and plan on a small scale mid-task. Do not create a large initial plan.\nTask: {body}"
     prompts_wake_up: str = "You exited the tool loop without explicitly completing the task or taking a step. Please use a tool to proceed or mark the task as done."
     prompts_agentic_loop_title: str = "Agentic Loop"
-    
+
     # -- Behaviour -----------------------------------------------------------
     log_level: str = "INFO"
 
     _extra: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
+
 _KNOWN_FIELDS: frozenset[str] = frozenset(f.name for f in fields(AgentConfig))
+
 
 def load_config(path: str | Path = "wrapper_config.toml") -> AgentConfig:
     cfg = AgentConfig()
@@ -59,7 +58,7 @@ def load_config(path: str | Path = "wrapper_config.toml") -> AgentConfig:
 
     flat.update(raw)
     extra: dict[str, Any] = {}
-    
+
     for k, v in flat.items():
         if k in _KNOWN_FIELDS and k != "_extra":
             setattr(cfg, k, v)
@@ -68,4 +67,3 @@ def load_config(path: str | Path = "wrapper_config.toml") -> AgentConfig:
 
     cfg._extra = extra
     return cfg
-
