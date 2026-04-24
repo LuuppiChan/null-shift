@@ -1,10 +1,11 @@
 import json
 import logging
 from pathlib import Path
-from typing import Iterable, cast
+from typing import Any, Iterable, cast
 
 from langchain_core.messages import (
     AIMessage,
+    AIMessageChunk,
     BaseMessage,
     HumanMessage,
     SystemMessage,
@@ -15,6 +16,7 @@ from langchain_core.messages import (
 )
 
 from core.config import manager
+from core.backends import get_backend
 
 logger = logging.getLogger(__name__)
 
@@ -98,13 +100,15 @@ class History:
                         )
 
                 case HumanMessage():
-                    valid = last is None or isinstance(last, (SystemMessage, AIMessage))
+                    valid = last is None or isinstance(
+                        last, (SystemMessage, AIMessage, AIMessageChunk)
+                    )
                     if valid:
                         validated.append(msg)
                     else:
                         logger.warning("Invalid HumanMessage at %s", i)
 
-                case AIMessage():
+                case AIMessageChunk() | AIMessage():
                     valid = isinstance(last, (ToolMessage, HumanMessage))
                     if valid:
                         if expected_tool_calls:
@@ -132,7 +136,7 @@ class History:
 
                 case ToolMessage(tool_call_id=tid):
                     valid = (
-                        isinstance(last, (AIMessage, ToolMessage))
+                        isinstance(last, (AIMessage, AIMessageChunk, ToolMessage))
                         and tid in expected_tool_calls
                     )
                     if valid:
@@ -146,61 +150,237 @@ class History:
                         "Unknown message type found at %s: %s, dropping.", i, type(msg)
                     )
 
-        while validated and not isinstance(validated[-1], AIMessage):
-            validated.pop()
+        if expected_tool_calls:
+            for missing_id in expected_tool_calls:
+                validated.append(
+                    ToolMessage(
+                        content="Error: Tool execution was interrupted or result was lost.",
+                        tool_call_id=missing_id,
+                    )
+                )
+
+        if validated and not isinstance(validated[-1], (AIMessage, AIMessageChunk)):
+            logger.info("Keeping history. Appending an AIMessage to close the turn.")
+            recovery_prompt = (
+                "[System Notification: The previous workflow was abruptly interrupted. "
+                "Any pending actions were aborted. "
+                "Please seamlessly process the user's newest request without apologizing for the interruption.]"
+            )
+            validated.append(AIMessage(content=recovery_prompt))
+
+        # Alternatively we could be aggressive, but the dangling tools suck ass so it's better to just add an AI message
+        # while validated and not isinstance(validated[-1], (AIMessage, AIMessageChunk)):
+        #     popped = validated.pop()
+        #     logger.info("Popping a message: %s", type(popped))
+
+        logger.info("History validated.")
 
         self.messages = validated
 
-    def trim_history(self, length: int | None = None):
+    async def trim_history(self, length: int | None = None):
         """
         Trims the history by removing old messages based on either the config or an input argument.
         First message will either be a ToolMessage or HumanMessage.
         """
-        if length is None:
-            length = manager.get_config().core_history_length
+        cfg = manager.get_config()
 
-        logger.info("History length: %s/%s", len(self.messages), length)
-        if len(self.messages) < length:
+        # Determine our threshold and target lengths based on compression settings
+        if length is None:
+            if cfg.core_history_compression:
+                length_threshold = cfg.core_history_compression_threshold
+                target_length = cfg.core_history_compression_target_length
+            else:
+                length_threshold = cfg.core_history_length
+                target_length = cfg.core_history_length
+        else:
+            length_threshold = length
+            target_length = length
+
+        logger.info("History length: %s/%s", len(self.messages), length_threshold)
+        if len(self.messages) < length_threshold:
             logger.info("No history trimming needed.")
             return
 
-        # Get all human messages
-        human_messages = 0
+        # Get all possible split positions
         positions: list[int] = []
         for i, msg in enumerate(self.messages):
             if isinstance(msg, HumanMessage):
-                human_messages += 1
                 positions.append(i)
+            # This fucked the system
+            # Also adding this feature WILL ALSO degrade the answer quality and make possible infinite loops
+            # Future me, trust the past me when I realized the agent was looping for no reason for 30 minutes.
+            # elif isinstance(msg, (AIMessage, AIMessageChunk)) and cfg.core_history_compression:
+            #     positions.append(i)
 
-        # Pop the last so that we don't accidentally delete all human messages
+        # removing this also fucked the trimming
         if positions:
             positions.pop()
 
         # VertexAI is strict about human messages.
         # It crashes if the first message isn't human message.
-        if human_messages <= 1:
+        if not positions:
             logger.info(
                 "Cannot trim due to the shortage of human messages (%s).",
-                human_messages,
+                len(positions),
             )
             return
 
         ok_pos = 0
-        # Now we trim
+        # Iterate through HumanMessage positions from oldest to newest.
+        # We want to find the first cut-off point that leaves us with a history length
+        # smaller than our target `length`.
         for pos in positions:
-            # instead of actually creating lists let's use pure numbers
+            # instead of actually creating lists let's use
+            # candidate represents how many messages would be left if we split at `pos` pure numbers
             candidate = len(self.messages) - pos
             # If we're shorter than target we break
-            if candidate < length:
+            if candidate <= target_length:
+                # The trimming was way too harsh
+                # I hope this makes it trim less hard.
+                continue
                 # Do the actual history change
+                popped_messages = self.messages[:pos]
                 self.messages = self.messages[pos:]
-                break
-
+                break  # Exiting here skips the `else` block below
+            # Keep track of the last valid cut-off point we checked
             ok_pos = pos
         else:
+            popped_messages = self.messages[:ok_pos]
+            # The `else` block on a for-loop executes ONLY if the loop finishes without hitting `break`.
+            # This happens if a single back-and-forth (e.g., lots of tool calls)
+            # is longer than our target `length`. We couldn't get it under the limit,
+            # so we just trim as much as we safely can using the last known valid position.
             self.messages = self.messages[ok_pos:]
 
-        logger.info("History trimmed %s/%s", len(self.messages), length)
+        # Skip if there's nothing to compress
+        if not popped_messages:
+            logger.info("No messages were popped.")
+            return
+
+        # Prevent pointless API calls if compression is impossible
+        #  Since summarize_history returns at least 1 (often 2) messages,
+        # popping <= 2 messages will not shrink the history.
+        if len(popped_messages) <= 2 and cfg.core_history_compression:
+            self.messages = popped_messages + self.messages
+            logger.warning(
+                "Cannot trim history: The sequence of recent tool/AI messages is too long to safely compress."
+            )
+            return
+
+        # Skip if compression is disabled in config
+        if not cfg.core_history_compression:
+            logger.info(
+                "History trimmed %s/%s (Compression Disabled)",
+                len(self.messages),
+                length,
+            )
+            return
+
+        if cfg.core_history_compression:
+            try:
+                summary = await summarize_history(popped_messages, self.messages[0])
+                self.messages = summary + self.messages
+            except Exception as e:
+                logger.warning("Didn't compress the history: %s", e)
+                # Because I don't want to lose my history on an error.
+                self.messages = popped_messages + self.messages
+
+        # Move this here because it's more logical to be here instead of before pop messages return
+        logger.info("History trimmed %s/%s", len(self.messages), length_threshold)
+
+
+async def summarize_history(
+    messages: list[BaseMessage], message_after_summary: BaseMessage
+) -> list[BaseMessage]:
+    """Returns the some messages with the summary ready to be appended to the messages."""
+    cfg = manager.get_config()
+    md = messages_to_md(messages)
+    system = cfg.core_history_compression_prompt
+    human = HumanMessage(md)
+    msgs = [SystemMessage(system), human]
+    llm = get_backend()
+    llm.set_model(cfg.core_history_compression_model)
+    llm.set_thinking(None)
+    full = None
+    logger.info("Summarizing history...")
+    for _ in range(3):
+        try:
+            async for chunk in llm.stream(msgs, None):
+                full = chunk if full is None else cast(AIMessage, full + chunk)
+            break
+        except Exception as e:
+            logger.error("Creating summary failed: %s", e)
+
+    llm.reset_customs()
+
+    if full and content_exists(full.content):
+        summary = HumanMessage(full.content)
+        if messages and isinstance(message_after_summary, (AIMessage, AIMessageChunk)):
+            return [summary]
+        else:
+            ai = AIMessage("Summary acknowledged.")
+            return [summary, ai]
+    else:
+        logger.error("Error creating summary message. Keeping history.")
+        raise Exception("Summary exception")
+
+
+def messages_to_md(messages: list[BaseMessage]) -> str:
+    parts = []
+    for msg in messages:
+        parts.append(message_to_md(msg))
+
+    return "\n\n\n".join(parts)
+
+
+def message_to_md(message: BaseMessage) -> str:
+    """Return empty string if unknown message. (such as SystemMessage)"""
+    match message:
+        case AIMessage() | AIMessageChunk():
+            return f"# AI Message\n{msg_dict_to_msg(message.content)}"
+        case HumanMessage():
+            return f"# Human Message\n{msg_dict_to_msg(message.content)}"
+        case ToolMessage():
+            return f"# Tool Message\n{msg_dict_to_msg(message.content)}"
+        case _:
+            return ""
+
+
+def msg_dict_to_msg(msg: str | list[str | dict[str, Any]]) -> str:
+    if isinstance(msg, str):
+        return msg
+
+    cumulated = []
+    for block in msg:
+        if isinstance(block, str):
+            cumulated.append(block)
+            continue
+
+        msg_type = block.get("type")
+        text = block.get("text")
+        mtype = block.get("mime_type")
+        cumulated.append(f"## Content type: {msg_type}")
+        cumulated.append(
+            f"{text or mtype or 'Cannot show this type of content in text'}\n"
+        )
+
+    return "\n".join(cumulated)
+
+
+def content_exists(msg: str | list[str | dict[str, Any]]) -> bool:
+    """Whether content has stuff in it."""
+    if isinstance(msg, str):
+        return bool(msg)
+
+    for block in msg:
+        if isinstance(block, str):
+            return True
+
+        text = block.get("text", block.get("reasoning"))
+        if text:
+            return True
+
+    return False
 
 
 def test():

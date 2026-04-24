@@ -124,6 +124,14 @@ class CoreConfig(BaseModel):
     core_retry_delay: float = 5.0
     core_history_length: int = 25
     core_history_path: str = "~/.null-shift/brain/history.json"
+    core_history_compression: bool = True
+    core_history_compression_threshold: int = 40
+    core_history_compression_target_length: int = 20
+    core_history_compression_model: str = "gemini-2.5-flash-lite"
+    # just default, put one to the .toml
+    core_history_compression_prompt: str = (
+        "Summarize key details from the user's message."
+    )
 
     core_prompt_path: str = "prompts/"
     core_prompt_recursive: bool = False

@@ -90,14 +90,26 @@ class Vector:
             while not handle.done():
                 await asyncio.sleep(0.1)
 
-            e = handle.exception()
-            if e:
-                logger.critical(
-                    "Stream returned an exception: %s",
-                    e,
-                    stack_info=True,
-                    exc_info=True,
-                )
+            if handle.cancelled():
+                logger.info("Message stream task was cancelled.")
+            else:
+                # Idk if it returns the error or raises an error.
+                try:
+                    e = handle.exception()
+                    if e:
+                        logger.critical(
+                            "Stream returned an exception: %s",
+                            e,
+                            stack_info=True,
+                            exc_info=True,
+                        )
+                except Exception as e:
+                    logger.error(
+                        "Stream returned an exception: %s",
+                        e,
+                        stack_info=True,
+                        exc_info=True,
+                    )
 
             await socket_out.send(BusMessage(topic=MessageTopic.FINISHED))
             state.is_running = False
@@ -154,7 +166,7 @@ class Vector:
         """
         self.history.load()
         self.history.validate_history()
-        self.history.trim_history()
+        await self.history.trim_history()
 
         config = manager.get_config()
 
@@ -191,8 +203,10 @@ class Vector:
         # Maybe infer mode later?
         # I don't know if it would make sense though.
         # Probably not
-        if message.goal:
-            data["goal"] = message.goal
+        # Also make this always be set so that the model 
+        # doesn't accidentally start doing something weird
+        # from a past goal.
+        data["goal"] = message.goal
         agent_data_path.write_text(json.dumps(data))
         agent_mode = is_autonomous(difficulty)
 
@@ -207,8 +221,13 @@ class Vector:
             max_iterations = config.core_max_llm_iterations
             bypass_iterations = config.task_agent_ignore_iterations and agent_mode
             # Reload every turn
-            tools = await get_tools()
-            logger.info("Got %s tool(s) for the LLM.", len(tools))
+            if difficulty == Difficulty.SIMPLE:
+                # No tools for simple requests
+                logger.info("Simple mode selected. No tools are given for the LLM.")
+                tools = {}
+            else:
+                tools = await get_tools()
+                logger.info("Got %s tool(s) for the LLM.", len(tools))
 
             logger.info(
                 "LLM iteration %s/%s, retries %s/%s",
@@ -225,6 +244,7 @@ class Vector:
                 break
             except Exception as e:
                 logger.error("Stream error: %s", e)
+                logger.debug("Stream hisotory at error time: %s", self.history.messages)
                 retries += 1
                 logger.info(
                     "Stream retries: %s/%s", retries, config.core_max_llm_retries
@@ -276,7 +296,7 @@ class Vector:
             self.history.append(full_response)
             # Save and validate here because of the validation system
             self.history.save()
-            self.history.trim_history()
+            await self.history.trim_history()
 
             if i >= max_iterations and not bypass_iterations:
                 logger.warning("Exeeded max LLM iterations (%s)", max_iterations)
