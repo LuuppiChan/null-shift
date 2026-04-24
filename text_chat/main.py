@@ -5,6 +5,7 @@ from pathlib import Path
 from threading import Event
 from time import sleep
 from typing import cast
+import signal
 
 import zmq
 from pydantic import BaseModel
@@ -64,11 +65,9 @@ class TextChat:
                     last_was_reason = bool(reasoning)
                 case MessageTopic.TOOL_CALL:
                     tool_name = message.payload.get("tool_name", "No name")
-                    background = message.payload.get("args", {}).get(
-                        "background", False
-                    )
-                    bg = ": background=True" if background else ""
-                    print(colored(f"\nTOOL: [{tool_name}{bg}] called", "dark_grey"))
+                    args = "\n".join([f"    {k}={v}" for k, v in message.payload.get("args", {}).items()])
+                    print(colored(f"\nTOOL: [{tool_name}] called\n{args}", "dark_grey"))
+                    # print("\n".join([f"   {k}: {v}" for k, v in message.payload.get("args", {})]))
                     code = message.payload.get("args", {}).get("code", "")
                     if code:
                         print(colored(code, "green"))
@@ -135,6 +134,9 @@ class TextChat:
                     case "/goal" | "/g":
                         goal = arg
                         msg = None
+                    case "/q" | "/quit":
+                        signal.raise_signal(signal.SIGINT)
+                        break
                     case "/" | "/help" | _:
                         print(
                             "Commands: '/abort' (/a), '/difficulty' (/d), '/title' (/t), '/goal' (/g)"
