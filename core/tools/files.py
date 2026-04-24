@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import logging
 import os
 import re
@@ -96,10 +97,18 @@ def file_read(
     end_line: Optional[int | float] = None,
 ) -> str | list[str | dict[str, str]]:
     """
+    Primary file reading tool.
     Reads files with line-range support.
     Handles both text and binary files, with automatic encoding detection.
     Respects permission boundaries.
     Start and end lines are seconds when reading videos.
+
+    Supported file types includes, but is not limited to
+    - text
+    - image
+    - video
+    - pdf
+    - audio
 
     Args:
         file_path: Absolute path to the file or an artifact name.
@@ -173,11 +182,27 @@ def file_read(
                 {"text": "The audio has been attached to this message."}
             )
     elif mime == "application/pdf":
-        loader = PyPDFLoader(file_path)
-        docs = loader.load()
-        for doc in docs:
-            doc.page_content = _enforce_character_limit(doc.page_content)
-            content_list.append(doc.to_json())
+        # Just send to the content is as base64 as-is
+        # Vertex AI will probably handle it.
+        from core.backends import get_backend
+        from core.backends.vertexai import VertexAIBackend
+
+        if isinstance(get_backend(), VertexAIBackend):
+            data = base64.b64encode(path.read_bytes()).decode()
+            content_list.append(
+                {
+                    "type": "file",
+                    "source_type": "base64",
+                    "data": data,
+                    "mime_type": "mime",
+                }
+            )
+        else:
+            loader = PyPDFLoader(file_path)
+            docs = loader.load()
+            for doc in docs:
+                doc.page_content = _enforce_character_limit(doc.page_content)
+                content_list.append(doc.to_json())
     else:
         return _enforce_character_limit(f"Error: Unsupported file type: {mime}")
 
@@ -310,10 +335,12 @@ def file_glob(pattern: str, file_path: str | Artifacts) -> str:
 
         found_files = []
         files = asyncio.run(
-            run_killable(lambda: path_obj.glob(pattern), timeout=timeout)
+            run_killable(lambda: list(path_obj.glob(pattern)), timeout=timeout)
         )
         if files is None:
-            raise TimeoutError("Globbing took too long and timed out")
+            raise TimeoutError(
+                "Globbing took too long and timed out or there was an internal issue with the tool"
+            )
 
         for p in files:
             if not p.is_file():  # Only search files
