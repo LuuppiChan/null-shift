@@ -18,6 +18,7 @@ pathvalidate
 playwright
 
 # tools
+pypdf
 python-magic
 langchain-community
 opencv-python

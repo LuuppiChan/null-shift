@@ -286,7 +286,9 @@ async def run_killable[T](
     if p.is_alive():
         p.terminate()
         logger.warning("Worker process %s timed out.", function.__name__)
-        p.join()
+        # I think this leaves the process hanging,
+        # but it's better than freezing the whole program.
+        p.join(1)
         parent_conn.close()
         return None
 
