@@ -73,6 +73,8 @@ class ToolConfig(BaseModel):
             "readelf",
             "nm",
             "ldd",
+            "uniq",
+            "objdump",
         ]
     )
 
@@ -103,7 +105,7 @@ class CoreConfig(BaseModel):
 
     litellm_provider: Optional[str] = None
 
-    task_infer_model: str = "gemini-2.5-flash-lite-preview"
+    task_infer_model: str = "gemini-2.5-flash-lite"
     task_infer_temperature: Optional[float] = 0.4
     task_infer_prompt: str = ""
     task_infer_agent_mode: Literal[
