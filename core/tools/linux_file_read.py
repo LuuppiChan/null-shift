@@ -2,12 +2,15 @@
 Linux specific tools for the AI to read files.
 """
 
+import shutil
 import subprocess
+from pathlib import Path
 from typing import Literal, TypedDict
 
 from langchain_core.tools import tool
 
 from core.config import tool_manager
+from core.helpers import enforce_character_limit
 
 # Is set every time this module is reloaded, I think that's frequent enough.
 allowed_commands = tool_manager.get_config().linux_read_allowed_commands
@@ -21,7 +24,10 @@ class Command(TypedDict):
 
 
 @tool
-def run_command(programs: list[Command]) -> str:
+def run_command(
+    programs: list[Command],
+    timeout: float = tool_manager.get_config().linux_read_command_timeout,
+) -> str:
     """
     This tool allows running the given read-only CLI programs.
     To pipe input you must put list the programs in order.
@@ -34,6 +40,7 @@ def run_command(programs: list[Command]) -> str:
         program: One single program to run, under is a breakdown of the keys
             program: the name of the program you want to run
             args: list of arguments to the given program
+        timeout: Per-command timeout to mitigate hanging.
 
     Examples:
     Refer to the provided JSON schema for the actual format.
@@ -61,8 +68,9 @@ def run_command(programs: list[Command]) -> str:
     # no args
     run_command({"program": "ls"})
     """
-    # create per-command timeout to config
-    # create configurable ALLOWED_PROGRAMS to config
+    # Bytes or string?
+    # For now let's use strings.
+    # Maybe if we encounter some decoding issue we will use bytes internally.
     piped = ""
     for i, program in enumerate(programs):
         p = program.get("program")
@@ -75,10 +83,65 @@ def run_command(programs: list[Command]) -> str:
         if p not in allowed_commands:
             return f"Error: {p} at the index of {i} is not in the allowed programs."
 
-        out = subprocess.run([p, *args], text=True, capture_output=True, input=piped)
+        out = subprocess.run(
+            [p, *args], text=True, capture_output=True, input=piped, timeout=timeout
+        )
         if out.returncode != 0:
-            return f"Error running {p}: {out.stdout or out.stderr}"
+            return f"Error running '{p}': {enforce_character_limit(out.stdout or out.stderr or '(No output)')}"
         piped = out.stdout or out.stderr
 
     # At the end piped is just the output of the last program.
-    return piped
+    return enforce_character_limit(piped)
+
+
+def _is_in_desktop(target_path: Path) -> bool:
+    """
+    A separate check to verify if the given path is located
+    somewhere inside the current Linux user's Desktop directory.
+    """
+    desktop_dir = (Path.home() / "Desktop").resolve()
+
+    # .is_relative_to() checks if a path is a child of another path (Requires Python 3.9+)
+    return target_path.is_relative_to(desktop_dir)
+
+
+@tool
+def decompress_file(input_path: str, target_path: str) -> str:
+    """
+    Uncompresses a file to a target path.
+    Currently only Desktop file paths are allowed.
+    Fails if target path exists.
+
+    Args:
+        input_path: Absolute path to the compressed archive (e.g., .zip, .tar.gz).
+        target_path: Destination path where contents will be extracted.
+    """
+    # 1. Expand user (e.g., '~') and resolve to an absolute path for the input
+    resolved_input = Path(input_path).expanduser().resolve()
+
+    if not resolved_input.is_file():
+        raise FileNotFoundError(
+            f"The input compressed file was not found: {resolved_input}"
+        )
+
+    # Prepare the target path
+    resolved_target = Path(target_path).expanduser().resolve()
+
+    # 2. Check if the target path already exists; error out if it does
+    if resolved_target.exists():
+        raise FileExistsError(
+            f"Target path '{resolved_target}' already exists. Aborting operation."
+        )
+
+    # 3. Perform the separate check to ensure the target is inside the Desktop
+    if not _is_in_desktop(resolved_target):
+        raise PermissionError(
+            f"Target path '{resolved_target}' is not within the current user's Desktop directory."
+        )
+
+    # 4. Uncompress the file
+    # shutil.unpack_archive creates the target directory and extracts contents automatically
+    shutil.unpack_archive(str(resolved_input), str(resolved_target))
+
+    # 5. Return a string stating what was done
+    return f"Success: Uncompressed '{resolved_input.name}' into the directory '{resolved_target}'."
