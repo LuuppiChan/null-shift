@@ -5,19 +5,27 @@ Dynamic agent system prompt based on the current task.
 from core.config import manager
 from global_types import Difficulty
 
-SIMPLE = """<task_difficulty>
+POSSIBLE_TASK_MODES = """<possible_task_modes>
+The mode is either chosen by the user or system to reflect the difficulty of the current user message.
+The `task_difficulty` tag tells you how to complete the current objective and what the currently selected mode is.
+
+Possible modes are:
+SIMPLE, TOOL_ASSISTED, AUTONOMOUS_STRICT, AUTONOMOUS_TRAJECTORY
+</possible_task_modes>"""
+
+SIMPLE = """<task_difficulty selected_mode="SIMPLE">
 User's task is simple and should not need any tools to complete it.
 Use your own knowledge and context in the system prompt to fullfill it.
 </task_difficulty>
 """
 
-TOOL_ASSISTED = """<task_difficulty>
+TOOL_ASSISTED = """<task_difficulty selected_mode="TOOL_ASSISTED">
 User's task may need some tools to complete it.
 Use your own knowledge, context in the system prompt and most notably tools to fullfill user's request.
 </task_difficulty>
 """
 
-AUTONOMOUS_STRICT = """<task_difficulty>
+AUTONOMOUS_STRICT = """<task_difficulty selected_mode="AUTONOMOUS_STRICT">
 User has requested an agentic task. This section outlines the process you will follow to complete the task.
 
 # Workflow Type
@@ -106,7 +114,7 @@ If something unexpected happens that wasn't accounted in your plan. **Go back**,
 **After completion call the agent_complete_objective tool.**
 </task_difficulty>"""
 
-AUTONOMOUS_TRAJECTORY = """<task_difficulty>
+AUTONOMOUS_TRAJECTORY = """<task_difficulty selected_mode="AUTONOMOUS_TRAJECTORY">
 User has requested an agentic task. This section outlines the process you will follow to complete the task.
 
 # Workflow Type
@@ -157,17 +165,19 @@ def collect() -> str | None:
     difficulty: Difficulty = data.get(
         "difficulty", manager.get_config().task_default_difficulty_fallback
     )
+    selected: str
     match difficulty:
         case Difficulty.SIMPLE:
-            return SIMPLE
+            selected = SIMPLE
         case Difficulty.TOOL_ASSISTED:
-            return TOOL_ASSISTED
+            selected = TOOL_ASSISTED
         case Difficulty.AUTONOMOUS_STRICT:
-            return AUTONOMOUS_STRICT
+            selected = AUTONOMOUS_STRICT
         case Difficulty.AUTONOMOUS_TRAJECTORY:
-            return AUTONOMOUS_TRAJECTORY
+            selected = AUTONOMOUS_TRAJECTORY
         case _:  # will never happens
             logger.critical(
                 "Something that should've never happened, happened: prompts/agent_prompt.py, line 160."
             )
             return None
+    return "\n\n".join([POSSIBLE_TASK_MODES, selected])

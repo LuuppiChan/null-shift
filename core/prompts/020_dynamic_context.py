@@ -34,9 +34,10 @@ class SystemContext:
                     '{"artist":"{{artist}}","title":"{{title}}"}',
                 ).stdout
             )
+            media_status: str = completed("playerctl", "status").stdout
         except Exception:
             playing_media = {}
-        media_status: str = completed("playerctl", "status").stdout
+            media_status = ""
 
         if media_status == "Playing":
             self.playing_media: Optional[dict[str, Any]] = playing_media
@@ -77,6 +78,7 @@ def collect() -> str | None:
     )
     # prompt.add_part(ctx.home_path, "home_path", "Absolute home path")
     prompt.add_part(ctx.datetime, "current_time", "Current date and time")
+    prompt.add_part(ctx.home_path, "user_home_path")
     # prompt.add_part(
     #     fmt_dict(ctx.focused_window),
     #     "currently_focused_window",
