@@ -44,6 +44,10 @@ class LLMBackend(ABC):
     def set_temperature(self, temperature: float):
         """Set custom temperature."""
 
+    @abstractmethod 
+    def set_thinking(self, level: str | None):
+        """Set custom thinking level"""
+
 
 def get_backend() -> LLMBackend:
     """

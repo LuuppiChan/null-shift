@@ -74,3 +74,6 @@ class OpenAIBackend(LLMBackend):
 
     def set_model(self, model: str):
         self.llm.model_name = model
+
+    def set_thinking(self, level: str | None):
+        self.llm.reasoning_effort = level

@@ -61,3 +61,7 @@ class VertexAIBackend(LLMBackend):
     def set_model(self, model: str):
         self.config["model"] = model
         self._update_llm()
+
+    def set_thinking(self, level: str | None):
+        self.config["thinking_level"] = level
+        self._update_llm()

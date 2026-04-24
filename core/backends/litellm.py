@@ -60,3 +60,6 @@ class LiteLLMBackend(LLMBackend):
     def set_temperature(self, temperature: float):
         """Set custom temperature."""
         self.llm.temperature = temperature
+
+    def set_thinking(self, level: str | None):
+        self.llm.model_kwargs["reasoning_effort"] = level
