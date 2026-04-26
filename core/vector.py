@@ -203,7 +203,7 @@ class Vector:
         # Maybe infer mode later?
         # I don't know if it would make sense though.
         # Probably not
-        # Also make this always be set so that the model 
+        # Also make this always be set so that the model
         # doesn't accidentally start doing something weird
         # from a past goal.
         data["goal"] = message.goal
@@ -297,6 +297,11 @@ class Vector:
             # Save and validate here because of the validation system
             self.history.save()
             await self.history.trim_history()
+            if config.core_history_message_compression:
+                await self.history.compress_messages(
+                    config.core_history_message_compression_message_min_length,
+                    config.core_history_message_compression_message_min_char,
+                )
 
             if i >= max_iterations and not bypass_iterations:
                 logger.warning("Exeeded max LLM iterations (%s)", max_iterations)

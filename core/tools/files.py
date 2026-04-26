@@ -18,18 +18,18 @@ from global_types import run_killable
 logger = logging.getLogger(__name__)
 
 
-artifacts = ["memory", "plan", "task"]
+artifacts = ["MEMORY.md", "plan.md", "task.md"]
 type Artifacts = Literal[*artifacts]  # pyright: ignore[reportInvalidTypeForm]
 
 
 def _to_path(artifact: Artifacts) -> str:
     cfg = tool_manager.get_config()
     match artifact:
-        case "memory":
+        case "MEMORY.md":
             return cfg.dynamic_memory_path
-        case "plan":
+        case "plan.md":
             return cfg.dynamic_plan_path
-        case "task":
+        case "task.md":
             return cfg.dynamic_task_path
         case _:
             return ""
@@ -55,8 +55,10 @@ def _bypass_prompt(file_path: str | Path) -> bool:
 
     # resolved path
     path = Path(file_path).expanduser().resolve()
-    if str(path) in cfg.file_path_whitelist:
-        return True
+    for allowed in cfg.file_path_whitelist:
+        allowed = Path(allowed).expanduser().resolve()
+        if str(path).startswith(str(allowed)):
+            return True
     return False
 
 
@@ -283,12 +285,11 @@ def file_write(
 ) -> str:
     """
     Writes or appends content to a file.
+    Also can be used to delete files and directories by giving a path to them and writing an empty string.
     Args:
         file_path: Absolute path to the file or an artifact name.
-        content: The text to write.
+        content: The text to write. An empty string means to delete the file.
         overwrite: If True, replaces content. If False, appends.
-    Returns:
-        str: Confirmation or error.
     """
     resolved_path, err = _validate_and_resolve_path(file_path, "edit")
     if err:
@@ -297,7 +298,18 @@ def file_write(
 
     try:
         # Create directory if it doesn't exist (useful for scratchpad)
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        path = Path(file_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if content == "":
+            if path.is_dir():
+                try:
+                    path.rmdir()
+                except OSError:
+                    return "Error: Directory not empty, cannot remove."
+            else:
+                path.unlink(missing_ok=True)
+            return "File deleted or directory removed."
+
         mode = "w" if overwrite else "a"
         with open(file_path, mode) as f:
             f.write(content)

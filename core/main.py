@@ -11,6 +11,7 @@ import core.log_manager
 from core.config import CoreConfig, manager, state
 from global_types import BusMessage
 from core.vector import Vector
+import core.core_data
 
 logger = logging.getLogger(__name__)
 

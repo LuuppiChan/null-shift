@@ -61,7 +61,7 @@ class ConfigManager[T: BaseModel]:
         return self._config
 
 
-class Signal:
+class Signal[T, U]:
     """
     Simple async/sync event signals.
     Both work the same way.
@@ -69,7 +69,7 @@ class Signal:
     They are spawned as tasks.
     """
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: type[T], **kwargs: type[U]) -> None:
         self.args = args
         self.kwargs = kwargs
         self.connections: list[Connection] = []
@@ -91,7 +91,7 @@ class Signal:
         """Whether the callable is connected or not."""
         return callable in self.connections
 
-    def emit(self, *args, **kwargs):
+    def emit(self, *args: T, **kwargs: U):
         """
         Emit a signal and call all the connections.
         """

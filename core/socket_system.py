@@ -4,6 +4,7 @@ import logging
 import zmq.asyncio
 from zmq.asyncio import Socket
 
+from global_tools import Signal
 from global_types import BusMessage
 from core.config import manager
 
@@ -14,6 +15,7 @@ class SocketOut:
     """Wrapper for output socket."""
 
     def __init__(self) -> None:
+        self.sent = Signal(BusMessage)
         self._ctx = zmq.asyncio.Context()
         self._socket: Socket = self._ctx.socket(zmq.PUB)
         self._socket.bind(manager.get_config().zmq_output_bind)
@@ -45,6 +47,7 @@ class SocketOut:
         await self._ensure_rebind()
         logger.info("Sending message to topic: %s", message.topic)
         logger.debug("Full BusMessage object: %s", message)
+        self.sent.emit(message)
         await self._socket.send_multipart(
             [
                 message.topic.encode(),
