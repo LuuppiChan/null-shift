@@ -1,4 +1,5 @@
 import json
+import copy
 import logging
 from pathlib import Path
 from typing import Any, Iterable, cast
@@ -17,14 +18,15 @@ from langchain_core.messages import (
 
 from core.config import manager
 from core.backends import get_backend
+from global_tools import Signal
 
 logger = logging.getLogger(__name__)
 
 
 class History:
     def __init__(self) -> None:
-        # history without
         self.messages: list[BaseMessage] = []
+        self.added = Signal(BaseMessage)
 
     def with_system_message(self, system_message: SystemMessage) -> list[BaseMessage]:
         """Get the history with your system message."""
@@ -34,26 +36,47 @@ class History:
     def append(self, message: BaseMessage):
         """Append a message to the history."""
         self.messages.append(message)
+        self.added.emit(message)
 
     def extend(self, messages: Iterable[BaseMessage]):
         """Extend the history with these messages."""
         self.messages.extend(messages)
+        for msg in messages:
+            self.added.emit(msg)
 
-    def save(self):
-        """Save history to the file."""
-        config = manager.get_config()
-        path = Path(config.core_history_path).expanduser().resolve()
+    def save(self, path_override: str | None = None):
+        """
+        Save history to the file.
+
+        Args:
+            path_override: If provided, writes the contents to somewhere else than then config.core_history_path.
+        """
+        if path_override is not None:
+            path = Path(path_override).expanduser().resolve()
+        else:
+            config = manager.get_config()
+            path = Path(config.core_history_path).expanduser().resolve()
+
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch(exist_ok=True)
 
         history_data = messages_to_dict(self.messages)
 
-        path.write_text(json.dumps(history_data, indent=2), encoding="utf-8")
+        path.write_text(json.dumps(history_data, indent=2))
 
-    def load(self):
-        """Loads history from the file."""
-        config = manager.get_config()
-        path = Path(config.core_history_path).expanduser().resolve()
+    def load(self, path_override: str | None = None):
+        """
+        Loads history from the file.
+
+        Args:
+            path_override: If provided, writes the contents to somewhere else than then config.core_history_path.
+        """
+        if path_override is not None:
+            path = Path(path_override).expanduser().resolve()
+        else:
+            config = manager.get_config()
+            path = Path(config.core_history_path).expanduser().resolve()
+
         if not path.exists():
             logger.warning(
                 "Cannot load history: it doesn't exist at %s. Loading empty history.",
@@ -239,9 +262,9 @@ class History:
                 # I hope this makes it trim less hard.
                 continue
                 # Do the actual history change
-                popped_messages = self.messages[:pos]
-                self.messages = self.messages[pos:]
-                break  # Exiting here skips the `else` block below
+                # popped_messages = self.messages[:pos]
+                # self.messages = self.messages[pos:]
+                # break  # Exiting here skips the `else` block below
             # Keep track of the last valid cut-off point we checked
             ok_pos = pos
         else:
@@ -288,6 +311,47 @@ class History:
         # Move this here because it's more logical to be here instead of before pop messages return
         logger.info("History trimmed %s/%s", len(self.messages), length_threshold)
 
+    async def compress_messages(self, min_length: int = 5, min_char_limit: int = 5000):
+        """
+        Compresses absurdly large messages in the history to summaries.
+
+        Args:
+            min_length: How many last messages to preserve as original.
+        """
+        # gives all except n last messages
+        # it doesn't give any if here is less than n
+        # >>> [1,2,3,4][:-5]
+        # []
+        compressable = self.messages[:-min_length]
+
+        if not compressable:
+            logger.info("No long message compression, history is too short.")
+            return
+
+        # The i is the same index as in the real messages list.
+        for i, msg in enumerate(compressable):
+            if isinstance(msg.content, str) and len(msg.content) > min_char_limit:
+                compressed = await compress_message(msg)
+                logger.debug("Message %s compressed", i)
+            elif isinstance(msg.content, list) and msg.content:
+                for block in msg.content:
+                    if isinstance(block, str) and len(block) > min_char_limit:
+                        compressed = await compress_message(msg)
+                        logger.debug("Message %s compressed", i)
+                        break
+                    elif isinstance(block, dict):
+                        text = block.get("text")
+                        if text and len(text) > min_char_limit:
+                            compressed = await compress_message(msg)
+                            logger.debug("Message %s compressed", i)
+                            break
+                else:
+                    compressed = msg
+            else:
+                compressed = msg
+            self.messages[i] = compressed
+        logger.info("History compression completed.")
+
 
 async def summarize_history(
     messages: list[BaseMessage], message_after_summary: BaseMessage
@@ -301,8 +365,8 @@ async def summarize_history(
     llm = get_backend()
     llm.set_model(cfg.core_history_compression_model)
     llm.set_thinking(None)
-    full = None
     logger.info("Summarizing history...")
+    full = None
     for _ in range(3):
         try:
             async for chunk in llm.stream(msgs, None):
@@ -323,6 +387,37 @@ async def summarize_history(
     else:
         logger.error("Error creating summary message. Keeping history.")
         raise Exception("Summary exception")
+
+
+async def compress_message(msg: BaseMessage) -> BaseMessage:
+    """Compress a single message."""
+    cfg = manager.get_config()
+    system = SystemMessage(cfg.core_history_message_compression_prompt)
+    human = HumanMessage(message_to_md(msg))
+    msgs = [system, human]
+    llm = get_backend()
+    llm.set_model(cfg.core_history_compression_model)
+    llm.set_thinking(None)
+    logger.info("Summarizing message...")
+    full = None
+    for _ in range(3):
+        try:
+            async for chunk in llm.stream(msgs, None):
+                full = chunk if full is None else cast(AIMessage, full + chunk)
+            break
+        except Exception as e:
+            logger.error("Creating summary failed: %s", e)
+
+    llm.reset_customs()
+
+    if full and content_exists(full.content):
+        summarized = copy.deepcopy(msg)
+        summarized.content = full.content
+        return summarized
+    else:
+        logger.error("Failed to summarize message, returning original.")
+        summarized = copy.deepcopy(msg)
+        return summarized
 
 
 def messages_to_md(messages: list[BaseMessage]) -> str:

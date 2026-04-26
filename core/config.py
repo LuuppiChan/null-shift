@@ -84,6 +84,7 @@ class ToolConfig(BaseModel):
     dynamic_memory_path: str = "~/vm_drive/null-shift/MEMORY.md"
     dynamic_plan_path: str = "~/vm_drive/null-shift/plan.md"
     dynamic_task_path: str = "~/vm_drive/null-shift/task.md"
+    dynamic_scratchpad_path: str = "~/.null-shift/scratchpad/"
 
 
 class CoreConfig(BaseModel):
@@ -132,6 +133,12 @@ class CoreConfig(BaseModel):
     core_history_compression_prompt: str = (
         "Summarize key details from the user's message."
     )
+    core_history_message_compression_prompt: str = (
+        "Summarize key details from the user's message."
+    )
+    core_history_message_compression: bool = True
+    core_history_message_compression_message_min_length: int = 10
+    core_history_message_compression_message_min_char: int = 5000
 
     core_prompt_path: str = "prompts/"
     core_prompt_recursive: bool = False
