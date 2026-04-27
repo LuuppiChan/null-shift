@@ -15,7 +15,6 @@ PyAudio
 langdetect
 piper-tts
 pathvalidate
-playwright
 
 # tools
 pypdf
@@ -23,6 +22,8 @@ python-magic
 langchain-community
 opencv-python
 ddgs
+playwright
+markdownify
 
 # cli text chat
 termcolor

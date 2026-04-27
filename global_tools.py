@@ -3,16 +3,13 @@ Some global tools useful for any sub-module.
 """
 
 import asyncio
-import json
 import logging
 from inspect import iscoroutinefunction
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 import tomllib
 from pydantic import BaseModel
-
-from global_types import BusMessage
 
 type Connection = Callable | Callable[..., Awaitable]
 
@@ -20,7 +17,7 @@ type Connection = Callable | Callable[..., Awaitable]
 logger = logging.getLogger(__name__)
 
 
-def with_overrides[T: BaseModel](cls: type[T], config_path: Path) -> T:
+def with_overrides[T: BaseModel](cls: type[T], config_path: Path) -> T | None:
     """Get the config with overrides."""
     overrides = {}
 
@@ -30,7 +27,7 @@ def with_overrides[T: BaseModel](cls: type[T], config_path: Path) -> T:
             overrides = tomllib.loads(path.read_text())
         except tomllib.TOMLDecodeError as e:
             logger.error("(%s): Config parsing error: %s", config_path, e)
-            return cls()
+            return None
 
     return cls(**overrides)
 
@@ -40,21 +37,25 @@ class ConfigManager[T: BaseModel]:
         self.path = config_path
         self._config: T = config
         self._last_mtime: float = 0.0
-        self.config_updated = Signal()
+        self.config_updated: Signal[T, Any] = Signal()
 
     def get_config(self) -> T:
         """Get the current program configuration."""
         if self.path.exists():
             current_mtime = self.path.stat().st_mtime
             if current_mtime > self._last_mtime:
-                self._config = with_overrides(type(self._config), self.path)
-                logger.info(
-                    "Config was changed %s -> %s. Reloaded.",
-                    self._last_mtime,
-                    current_mtime,
-                )
-                self._last_mtime = current_mtime
-                self.config_updated.emit(self._config)
+                new = with_overrides(type(self._config), self.path)
+                if new is not None:
+                    self._config = new
+                    logger.info(
+                        "Config was changed %s -> %s. Reloaded.",
+                        self._last_mtime,
+                        current_mtime,
+                    )
+                    self._last_mtime = current_mtime
+                    self.config_updated.emit(self._config)
+                else:
+                    logger.info("Config not updated because of an error.")
         else:
             logger.warning("Config file doesn't exist: %s", self.path.resolve())
 
