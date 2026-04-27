@@ -1,8 +1,8 @@
 import asyncio
-from datetime import datetime, timedelta
-import logging
 import hashlib
 import importlib.util
+import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -45,15 +45,15 @@ class ToolRegistry:
     def get_files(self) -> list[Path]:
         """Returns all the python files (.py) in the current tool directory based on the config."""
         config = manager.get_config()
-        path = Path(config.core_tools_path)
-        pattern = "**/*.py" if config.core_tools_recursive else "*.py"
+        path = Path(config.tool_config.path)
+        pattern = "**/*.py" if config.tool_config.recursive else "*.py"
         return list(path.glob(pattern))
 
     async def get_tools(self) -> dict[str, LLMTool]:
         """Gets all the tools from tools folder."""
 
         needs_refresh = self.refreshed + timedelta(
-            manager.get_config().core_tools_min_refresh_delay
+            manager.get_config().tool_config.min_refresh_delay
         )
         if datetime.now() > needs_refresh:
             logger.info(
@@ -67,7 +67,7 @@ class ToolRegistry:
 
         await self.refresh_cache()
 
-        timeout = manager.get_config().core_tools_module_timeout
+        timeout = manager.get_config().tool_config.per_module_timeout
         logger.info("Loading tools with timeout: %s", timeout)
         files = sorted(self.cache.values(), key=lambda tf: tf.file.name)
         results: list[list[LLMTool] | None] = await run_batch_ordered(

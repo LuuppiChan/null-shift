@@ -16,6 +16,8 @@ from global_types import Difficulty
 
 logger = logging.getLogger(__name__)
 
+type ModelIdentifier = str | int | ModelInfo | None
+
 
 class ToolConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -87,71 +89,116 @@ class ToolConfig(BaseModel):
     dynamic_scratchpad_path: str = "~/.null-shift/scratchpad/"
 
 
-class CoreConfig(BaseModel):
+class ModelInfo(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    llm_provider: Literal["openai", "vertexai", "litellm"] | str = "openai"
-    llm_model_name: str = "gemini-2.5-flash-lite-preview"
-    llm_temperature: Optional[float] = Field(default=0.6, ge=0)
-    llm_base_url: str = "http://localhost:4000/v1"
-    llm_api_key: str = ""
-    llm_top_p: Optional[float] = Field(default=None, ge=0, le=1)
-    llm_presence_penalty: Optional[float] = Field(default=None, ge=-2, le=2)
-    llm_frequency_penalty: Optional[float] = Field(default=None, ge=-2, le=2)
-    llm_reasoning_effort: Optional[str] = None
-    llm_max_tokens: Optional[int] = None
+    # litellm fuckshit
+    provider: Literal["openai", "vertexai", "litellm"] | str | None = None
+    url: str | None = None
+    api_key: str | None = None
+    name: str | int = ""
+    reasoning_effort: str | None = None
+    temperature: Optional[float] = Field(default=None, ge=0)
+    top_p: Optional[float] = Field(default=None, ge=0, le=1)
+    presence_penalty: Optional[float] = Field(default=None, ge=-2, le=2)
+    frequency_penalty: Optional[float] = Field(default=None, ge=-2, le=2)
+    max_tokens: Optional[int] = None
+
+    def with_overrides(self, other: "ModelInfo") -> "ModelInfo":
+        return self.model_copy(
+            update=other.model_dump(
+                exclude_defaults=True, exclude_none=True, exclude_unset=True
+            ),
+            deep=True,
+        )
+
+
+class TaskModels(BaseModel):
+    main: ModelIdentifier = None
+    task_infer: ModelIdentifier = None
+    history_summary: ModelIdentifier = None
+    message_summary: ModelIdentifier = None
+
+
+class LLM(BaseModel):
+    default: ModelInfo = Field(default_factory=ModelInfo)
+    model_tiers: list[ModelInfo] = Field(default_factory=list)
 
     vertexai_project_id: str = ""
     vertexai_location: str = "global"
 
     litellm_provider: Optional[str] = None
 
-    task_infer_model: str = "gemini-2.5-flash-lite"
-    task_infer_temperature: Optional[float] = 0.4
-    task_infer_prompt: str = ""
-    task_infer_agent_mode: Literal[
+    models: TaskModels = Field(default_factory=TaskModels)
+
+
+class Prompts(BaseModel):
+    task_infer: str = 'You are an AI assistant that specializes in classifying user requests based on their complexity and requirements.\n\nYour task is to classify the user\'s input into one of the following categories:\n\n# Categories\n\n> Most questions fall to the Tool-Assisted Task category ("2").\n\n> If you\'re unsure, choose option "3".\n\n## 1. Simple Task\nThe task can be completed using only the model\'s internal knowledge, without needing external tools, real-time data, or research.\n\n## 2. Tool-Assisted Task\nThe task requires calling external tools or APIs (e.g., web search, calendar integration, file manipulation, command execution, window management) to complete a direct action.\n\n## 3. Autonomous Agent Task\nThe task is complex and requires a multi-step plan, extensive research, synthesis of information from multiple sources, or complex reasoning. Some tasks that would fall into this category:\n- Multi-step autonomous web tasks.\n- Tasks that take more than 5 tool calls.\n\n# Output\n\n## Examples\n\n### Simple Task\n```\nUser: What time is it?\nResponse: {\n  "difficulty": 1,\n  "reason": "Some common context is automatically provided such as time, date, ongoing events and computer state."\n}\n```\n\n### Tool-Assisted Task\n```\nUser: Can you add this event I\'m looking at to my calendar?\nResponse: {\n  "difficulty": 2,\n  "reason": "The AI needs a screenshot tool and calendar editing tool to complete this task."\n}\n```\n\n### Autonomous Agent Task\n```\nUser: Can you create a plan for a 2 week Japan trip?\nResponse: {\n  "difficulty": 3,\n  "reason": "This task requires complex planning, research and reasoning to be completed."\n}\n```'
+    history_compression: str = "You are a memory-compression subsystem for an autonomous AI agent. Your task is to summarize the provided conversation log (which contains Human, AI, and Tool messages) into a dense, highly informative context block.\n\nThis summary will be prepended to the main AI agent's future prompts to serve as its memory of past events.\n\nCRITICAL DIRECTIVES:\n1. Retain the Core Objective: What is the user ultimately trying to accomplish?\n2. Preserve Crucial Data: Extract and keep specific file paths, URLs, code snippets, names, IDs, or environmental facts discovered via tools. Do not abstract these away.\n3. Track Progress: Briefly state what actions have successfully been completed.\n4. Note Failures/Constraints: Mention any tool failures or dead ends so the agent doesn't repeat the same mistakes.\n5. Identify Next Steps: Highlight any unresolved tasks, pending questions, or ongoing plans.\n6. Be Concise: Strip out all pleasantries, repetitive errors, and conversational filler. Use bullet points for readability.\n\nOUTPUT FORMAT:\n**User Objective:** [Brief statement of the overarching goal]\n**Established Context:** [Bullet points of crucial facts, exact paths, and extracted data]\n**Actions Taken:** [Brief list of what was already done/attempted]\n**Current State / Pending:** [What the agent was doing or needs to do right before this cutoff]"
+    message_compression: str = 'You are an expert Message Compression Assistant within a larger AI agent system. Your task is to compress long tool call results, logs, and historical messages into highly condensed, information-dense summaries. The output will be read by another AI agent, not a human.\n\nOBJECTIVE: Maximize the signal-to-noise ratio. Retain 100% of the critical facts while using the absolute minimum number of tokens.\n\nRULES:\n1. NO CONVERSATIONAL FILLER: Do not use phrases like "The tool returned...", "Here is the summary...", or "The message says...". Start immediately with the data.\n2. PRESERVE EXACT DATA: Never generalize numbers, IDs, names, file paths, URLs, or error codes. Keep them exact.\n3. CAPTURE STATES: Clearly indicate if a tool call was a SUCCESS, FAILURE, or PARTIAL SUCCESS.\n4. REMOVE REDUNDANCY: If a log repeats the same error or status 10 times, state it once and note the repetition count.\n5. FORMAT: Use dense bullet points or key-value pairs for readability by the downstream agent.'
+
+
+class AgentConfig(BaseModel):
+    infer_agent_mode: Literal[
         Difficulty.AUTONOMOUS_STRICT, Difficulty.AUTONOMOUS_TRAJECTORY
     ] = Difficulty.AUTONOMOUS_TRAJECTORY
-    task_infer_default_fallback: Literal[1, 2, 3] = 2
-    task_default_difficulty_fallback: Difficulty = Difficulty.AUTONOMOUS_TRAJECTORY
+    infer_default_fallback: Literal[1, 2, 3] = 2
+    default_difficulty_fallback: Difficulty = Difficulty.AUTONOMOUS_TRAJECTORY
 
-    task_agent_ignore_iterations: bool = False
-    task_agent_data_path: str = "~/.null-shift/brain/agent.json"
-    task_agent_continue_prompt: str = "[AGENT SYSTEM]: You haven't indicated completion intent. Continue the task or call the agent_complete_objective tool. Remeber to stay in the tool call loop by calling tools every response!"
+    ignore_iterations: bool = False
+    data_path: str = "~/.null-shift/brain/agent.json"
+    continue_prompt: str = "[AGENT SYSTEM]: You haven't indicated completion intent. Continue the task or call the agent_complete_objective tool. Remeber to stay in the tool call loop by calling tools every response!"
 
-    core_default_batch_task_name: str = "Info"
-    core_max_llm_iterations: int = 1000
-    core_max_llm_retries: int = 3
-    core_retry_delay: float = 5.0
-    core_history_length: int = 25
-    core_history_path: str = "~/.null-shift/brain/history.json"
-    core_history_compression: bool = True
-    core_history_compression_threshold: int = 40
-    core_history_compression_target_length: int = 20
-    core_history_compression_model: str = "gemini-2.5-flash-lite"
-    # just default, put one to the .toml
-    core_history_compression_prompt: str = (
-        "Summarize key details from the user's message."
-    )
-    core_history_message_compression_prompt: str = (
-        "Summarize key details from the user's message."
-    )
-    core_history_message_compression: bool = True
-    core_history_message_compression_message_min_length: int = 10
-    core_history_message_compression_message_min_char: int = 5000
 
-    core_prompt_path: str = "prompts/"
-    core_prompt_recursive: bool = False
-    core_prompt_file_names: list[str] = [".py", ".md", ".xml"]
-    core_prompt_function_name: str = "collect"
-    core_prompt_function_timeout: float = 0.5
+class LogConfig(BaseModel):
+    silenced_libraries: list[str] = Field(default_factory=list)
+    level: str = "INFO"
+    to_file: bool = False
+    file_path: str = "core.log"
 
-    core_tools_path: str = "tools/"
-    core_tools_recursive: bool = False
-    core_tools_module_timeout: float = 1.0
-    core_tools_min_refresh_delay: float = 5.0
 
-    core_permission_yes_words: list[str] = Field(
+class StreamConfig(BaseModel):
+    default_batch_task_title: str = "Info"
+    max_iterations: int = 1000
+    max_retries: int = 3
+    retry_delay: float = 5.0
+
+
+class HistoryConfig(BaseModel):
+    length: int = 25
+    path: str = "~/.null-shift/brain/history.json"
+    compression: bool = True
+    compression_threshold: int = 30
+    compression_target_length: int = 15
+
+    message_compression: bool = True
+    message_compression_message_min_length: int = 10
+    message_compression_message_min_char: int = 5000
+
+
+class SocketConfig(BaseModel):
+    input: str = "tcp://*:5555"
+    output: str = "tcp://*:5556"
+    default_response_topic: str = "response"
+
+
+class PromptConfig(BaseModel):
+    path: str = "prompts/"
+    recursive: bool = False
+    file_names: list[str] = [".py", ".md", ".xml"]
+    function_name: str = "collect"
+    function_timeout: float = 0.5
+
+
+class ToolHandlingConfig(BaseModel):
+    path: str = "tools/"
+    recursive: bool = False
+    per_module_timeout: float = 2.0
+    min_refresh_delay: float = 5.0
+
+
+class PermissionsConfig(BaseModel):
+    yes_words: list[str] = Field(
         default_factory=lambda: [
             "yes",
             "yeah",
@@ -164,7 +211,7 @@ class CoreConfig(BaseModel):
             "proceed",
         ]
     )
-    core_permission_no_words: list[str] = Field(
+    no_words: list[str] = Field(
         default_factory=lambda: [
             "no",
             "nope",
@@ -177,20 +224,48 @@ class CoreConfig(BaseModel):
             "abort",
         ]
     )
-    core_permission_timeout: float = 30.0
-    core_response_default_topic: str = "response"
+    timeout: float = 30.0
 
-    zmq_input_bind: str = "tcp://*:5555"
-    zmq_output_bind: str = "tcp://*:5556"
 
-    log_silenced_libraries: list[str] = Field(default_factory=list)
-    log_level: str = "INFO"
-    log_to_file: bool = False
-    log_file_path: str = "core.log"
+class CoreConfig(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    llm: LLM = Field(default_factory=LLM)
+    stream: StreamConfig = Field(default_factory=StreamConfig)
+    history: HistoryConfig = Field(default_factory=HistoryConfig)
+    agent: AgentConfig = Field(default_factory=AgentConfig)
+    tool_config: ToolHandlingConfig = Field(default_factory=ToolHandlingConfig)
+    prompt_config: PromptConfig = Field(default_factory=PromptConfig)
+    prompts: Prompts = Field(default_factory=Prompts)
+    permissions: PermissionsConfig = Field(default_factory=PermissionsConfig)
+    socket: SocketConfig = Field(default_factory=SocketConfig)
+    log: LogConfig = Field(default_factory=LogConfig)
+
+    def get_model(self, identifier: ModelIdentifier) -> ModelInfo:
+        """Get model based on identifier."""
+        if isinstance(identifier, ModelInfo):
+            return self.llm.default.with_overrides(identifier)
+        elif identifier is None:
+            return self.llm.default
+        elif isinstance(identifier, (int, str)):
+            try:
+                index = int(identifier)
+                if 0 <= index < len(self.llm.model_tiers):
+                    return self.llm.model_tiers[index]
+                else:
+                    logger.warning(
+                        f"Model tier index '{index}' is out of bounds. Falling back to default."
+                    )
+                    return self.llm.default
+            except ValueError:
+                pass
+        # Should always be str and never int here
+        assert isinstance(identifier, str)
+        return self.get_model(ModelInfo(name=identifier))
 
 
 class RuntimeState(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
 
     shutdown_event: asyncio.Event = Field(default_factory=asyncio.Event)
     is_running: bool = False

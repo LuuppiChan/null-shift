@@ -1,5 +1,5 @@
-import json
 import copy
+import json
 import logging
 from pathlib import Path
 from typing import Any, Iterable, cast
@@ -16,8 +16,8 @@ from langchain_core.messages import (
     messages_to_dict,
 )
 
-from core.config import manager
 from core.backends import get_backend
+from core.config import manager
 from global_tools import Signal
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ class History:
             path = Path(path_override).expanduser().resolve()
         else:
             config = manager.get_config()
-            path = Path(config.core_history_path).expanduser().resolve()
+            path = Path(config.history.path).expanduser().resolve()
 
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch(exist_ok=True)
@@ -75,7 +75,7 @@ class History:
             path = Path(path_override).expanduser().resolve()
         else:
             config = manager.get_config()
-            path = Path(config.core_history_path).expanduser().resolve()
+            path = Path(config.history.path).expanduser().resolve()
 
         if not path.exists():
             logger.warning(
@@ -209,12 +209,12 @@ class History:
 
         # Determine our threshold and target lengths based on compression settings
         if length is None:
-            if cfg.core_history_compression:
-                length_threshold = cfg.core_history_compression_threshold
-                target_length = cfg.core_history_compression_target_length
+            if cfg.history.compression:
+                length_threshold = cfg.history.compression_threshold
+                target_length = cfg.history.compression_target_length
             else:
-                length_threshold = cfg.core_history_length
-                target_length = cfg.core_history_length
+                length_threshold = cfg.history.length
+                target_length = cfg.history.length
         else:
             length_threshold = length
             target_length = length
@@ -283,7 +283,7 @@ class History:
         # Prevent pointless API calls if compression is impossible
         #  Since summarize_history returns at least 1 (often 2) messages,
         # popping <= 2 messages will not shrink the history.
-        if len(popped_messages) <= 2 and cfg.core_history_compression:
+        if len(popped_messages) <= 2 and cfg.history.compression:
             self.messages = popped_messages + self.messages
             logger.warning(
                 "Cannot trim history: The sequence of recent tool/AI messages is too long to safely compress."
@@ -291,7 +291,7 @@ class History:
             return
 
         # Skip if compression is disabled in config
-        if not cfg.core_history_compression:
+        if not cfg.history.compression:
             logger.info(
                 "History trimmed %s/%s (Compression Disabled)",
                 len(self.messages),
@@ -299,7 +299,7 @@ class History:
             )
             return
 
-        if cfg.core_history_compression:
+        if cfg.history.compression:
             try:
                 summary = await summarize_history(popped_messages, self.messages[0])
                 self.messages = summary + self.messages
@@ -359,12 +359,11 @@ async def summarize_history(
     """Returns the some messages with the summary ready to be appended to the messages."""
     cfg = manager.get_config()
     md = messages_to_md(messages)
-    system = cfg.core_history_compression_prompt
+    system = cfg.prompts.history_compression
     human = HumanMessage(md)
     msgs = [SystemMessage(system), human]
-    llm = get_backend()
-    llm.set_model(cfg.core_history_compression_model)
-    llm.set_thinking(None)
+    model = cfg.get_model(cfg.llm.models.history_summary)
+    llm = get_backend(model)
     logger.info("Summarizing history...")
     full = None
     for _ in range(3):
@@ -374,8 +373,6 @@ async def summarize_history(
             break
         except Exception as e:
             logger.error("Creating summary failed: %s", e)
-
-    llm.reset_customs()
 
     if full and content_exists(full.content):
         summary = HumanMessage(full.content)
@@ -392,12 +389,11 @@ async def summarize_history(
 async def compress_message(msg: BaseMessage) -> BaseMessage:
     """Compress a single message."""
     cfg = manager.get_config()
-    system = SystemMessage(cfg.core_history_message_compression_prompt)
+    system = SystemMessage(cfg.prompts.message_compression)
     human = HumanMessage(message_to_md(msg))
     msgs = [system, human]
-    llm = get_backend()
-    llm.set_model(cfg.core_history_compression_model)
-    llm.set_thinking(None)
+    model = cfg.get_model(cfg.llm.models.message_summary)
+    llm = get_backend(model)
     logger.info("Summarizing message...")
     full = None
     for _ in range(3):
@@ -407,8 +403,6 @@ async def compress_message(msg: BaseMessage) -> BaseMessage:
             break
         except Exception as e:
             logger.error("Creating summary failed: %s", e)
-
-    llm.reset_customs()
 
     if full and content_exists(full.content):
         summarized = copy.deepcopy(msg)

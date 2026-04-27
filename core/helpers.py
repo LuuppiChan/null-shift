@@ -1,12 +1,12 @@
+import base64
 import json
 import logging
-from pathlib import Path
 import subprocess
-from typing import Any, Optional, Self
 import tempfile
+from pathlib import Path
+from typing import Any, Optional, Self
 
 import cv2
-import base64
 
 from core.config import manager, tool_manager
 
@@ -69,6 +69,7 @@ def enforce_character_limit(text: str) -> str:
             text[:limit] + f"\n... (output truncated due to character limit of {limit})"
         )
     return text
+
 
 def fmt_dict(to_format: dict[str, Any]) -> str:
     """Return a dict as a string as json with indent=2"""
@@ -214,7 +215,7 @@ def get_permission(prompt: str) -> bool:
     Placeholder for permission to use this tool.
     Currently asks console input.
     """
-    timeout = manager.get_config().core_permission_timeout
+    timeout = manager.get_config().permissions.timeout
 
     # Socket system thing here I think.
     print(prompt)
@@ -239,11 +240,11 @@ def get_permission(prompt: str) -> bool:
         return False
 
     # Prioritise decline
-    for word in manager.get_config().core_permission_no_words:
+    for word in manager.get_config().permissions.no_words:
         if word.lower() in text.lower():
             return False
 
-    for word in manager.get_config().core_permission_yes_words:
+    for word in manager.get_config().permissions.yes_words:
         if word.lower() in text.lower():
             return True
 

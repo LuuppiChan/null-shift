@@ -15,7 +15,7 @@ from langchain_core.tools import tool
 from pydantic import ValidationError
 
 from core.agent import convert_difficulty, infer_difficulty
-from core.backends import get_backend
+from core.backends import LLMBackend, get_backend
 from core.config import manager, state
 from core.context import get_context
 from core.history import History
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 class Vector:
     def __init__(self, input_queue: asyncio.Queue[BusMessage]) -> None:
-        self.llm = get_backend()
+        self.llm: LLMBackend
         self.input_queue: asyncio.Queue[BusMessage] = input_queue
         self.message_queue: asyncio.Queue[InputMessage] = asyncio.Queue()
         self.history = History()
@@ -189,9 +189,9 @@ class Vector:
             else:
                 difficulty = message.difficulty
         else:
-            difficulty = config.task_default_difficulty_fallback
+            difficulty = config.agent.default_difficulty_fallback
 
-        agent_data_path = Path(config.task_agent_data_path).expanduser().resolve()
+        agent_data_path = Path(config.agent.data_path).expanduser().resolve()
         agent_data_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             data = json.loads(agent_data_path.read_text())
@@ -218,8 +218,8 @@ class Vector:
 
         while True:
             config = manager.get_config()
-            max_iterations = config.core_max_llm_iterations
-            bypass_iterations = config.task_agent_ignore_iterations and agent_mode
+            max_iterations = config.stream.max_iterations
+            bypass_iterations = config.agent.ignore_iterations and agent_mode
             # Reload every turn
             if difficulty == Difficulty.SIMPLE:
                 # No tools for simple requests
@@ -234,7 +234,7 @@ class Vector:
                 i,
                 max_iterations,
                 retries,
-                config.core_max_llm_retries,
+                config.stream.max_iterations,
             )
             try:
                 full_response = await self._process_llm_stream(tools)
@@ -246,11 +246,9 @@ class Vector:
                 logger.error("Stream error: %s", e)
                 logger.debug("Stream hisotory at error time: %s", self.history.messages)
                 retries += 1
-                logger.info(
-                    "Stream retries: %s/%s", retries, config.core_max_llm_retries
-                )
-                await asyncio.sleep(config.core_retry_delay)
-                if retries >= config.core_max_llm_retries:
+                logger.info("Stream retries: %s/%s", retries, config.stream.max_retries)
+                await asyncio.sleep(config.stream.retry_delay)
+                if retries >= config.stream.max_iterations:
                     logger.error("Max retries reached, aborting stream.")
                     break
                 else:
@@ -297,10 +295,10 @@ class Vector:
             # Save and validate here because of the validation system
             self.history.save()
             await self.history.trim_history()
-            if config.core_history_message_compression:
+            if config.history.message_compression:
                 await self.history.compress_messages(
-                    config.core_history_message_compression_message_min_length,
-                    config.core_history_message_compression_message_min_char,
+                    config.history.message_compression_message_min_length,
+                    config.history.message_compression_message_min_char,
                 )
 
             if i >= max_iterations and not bypass_iterations:
@@ -318,7 +316,7 @@ class Vector:
                     break
                 else:
                     logger.error("LLM nudge triggered.")
-                    self.history.append(HumanMessage(config.task_agent_continue_prompt))
+                    self.history.append(HumanMessage(config.agent.continue_prompt))
             else:
                 break
 
@@ -330,7 +328,9 @@ class Vector:
         self, tools: dict[str, LLMTool]
     ) -> Optional[AIMessage]:
         full_response: Optional[AIMessage] = None
-        self.llm = get_backend()
+        cfg = manager.get_config()
+        model = cfg.get_model(cfg.llm.models.main)
+        self.llm = get_backend(model)
         context = await get_context()
         logger.info(
             "Running with system prompt with a length of %s", len(context.content)
@@ -524,7 +524,7 @@ class Vector:
             title = (
                 item.title
                 if item.title
-                else manager.get_config().core_default_batch_task_name
+                else manager.get_config().stream.default_batch_task_title
             )
             parts.append(f"## {title}\n" + item.body)
 

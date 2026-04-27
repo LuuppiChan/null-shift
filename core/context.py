@@ -22,7 +22,7 @@ class PromptAssembler:
 
     def __init__(self) -> None:
         config = manager.get_config()
-        self.path = Path(config.core_prompt_path)
+        self.path = Path(config.prompt_config.path)
         self.prompt_cache: dict[Path, CachedFile] = {}
         manager.config_updated.connect(self.config_updated)
 
@@ -30,7 +30,7 @@ class PromptAssembler:
         """Returns full system prompt."""
         await self.refresh_cache()
 
-        timeout = manager.get_config().core_prompt_function_timeout
+        timeout = manager.get_config().prompt_config.function_timeout
         logger.info("Loading prompt fragments with timeout: %s", timeout)
         files = sorted(self.prompt_cache.values(), key=lambda pf: pf.file.name)
         results: list[Optional[str]] = await run_batch_ordered(
@@ -68,7 +68,7 @@ class PromptAssembler:
 
     def config_updated(self, config: CoreConfig):
         """Reloads the path if the config was updated."""
-        self.path = Path(config.core_prompt_path)
+        self.path = Path(config.prompt_config.path)
 
     def get_files(self) -> list[Path]:
         """
@@ -81,8 +81,8 @@ class PromptAssembler:
             logger.error("Prompt path '%s' doesn't exist.", self.path)
             return []
 
-        extensions = config.core_prompt_file_names
-        pattern = "**/*" if config.core_prompt_recursive else "*"
+        extensions = config.prompt_config.file_names
+        pattern = "**/*" if config.prompt_config.recursive else "*"
         files: list[Path] = [
             p for p in self.path.glob(pattern) if p.suffix in extensions and p.is_file()
         ]
@@ -129,13 +129,13 @@ class PythonPromptFile(CachedFile):
 
         config = manager.get_config()
         function: Optional[Callable[[], Optional[str]]] = getattr(
-            module, config.core_prompt_function_name, None
+            module, config.prompt_config.function_name, None
         )
         if function is None:
             logger.warning(
                 "Prompt module %s has no function named %s",
                 self.file.name,
-                config.core_prompt_function_name,
+                config.prompt_config.function_name,
             )
             return None
 

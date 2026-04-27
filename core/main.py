@@ -37,13 +37,13 @@ def handle_signals():
 async def listener_loop(input_queue: asyncio.Queue[BusMessage]):
     logger = logging.getLogger("listener_loop")
     sock = ctx.socket(zmq.PULL)
-    current_bind = manager.get_config().zmq_input_bind
+    current_bind = manager.get_config().socket.input
     sock.bind(current_bind)
     needs_rebind = False
 
     def trigger_rebind(new_config: CoreConfig):
         nonlocal needs_rebind
-        new_bind = new_config.zmq_input_bind
+        new_bind = new_config.socket.input
         if new_bind != current_bind:
             needs_rebind = True
 
@@ -54,7 +54,7 @@ async def listener_loop(input_queue: asyncio.Queue[BusMessage]):
             if needs_rebind:
                 try:
                     logger.info("Socket updated, rebinding...")
-                    new_bind = manager.get_config().zmq_input_bind
+                    new_bind = manager.get_config().socket.input
                     sock.unbind(current_bind)
                     await asyncio.sleep(0.1)
                     sock.bind(new_bind)

@@ -4,6 +4,7 @@ Contains tools and helper functions related to agent loop.
 
 import logging
 from typing import Literal
+
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -24,21 +25,19 @@ class DifficultyInferSchema(BaseModel):
 def infer_difficulty(message: str) -> DifficultyInferSchema:
     """Infer difficulty based on the message with the power of black magic... I mean AI. **AI**"""
     config = manager.get_config()
-    system = SystemMessage(config.task_infer_prompt)
+    system = SystemMessage(config.prompts.task_infer)
     human = HumanMessage("User: " + message)
     history: list[BaseMessage] = [system, human]
-    llm = get_backend()
-    llm.set_model(config.task_infer_model)
-    llm.set_temperature(config.task_infer_temperature)
+    model = config.get_model(config.llm.models.task_infer)
+    llm = get_backend(model)
     try:
         logger.info("Inferring task difficulty.")
         difficulty = llm.structured_output(history, DifficultyInferSchema)
     except Exception as e:
         logger.error("Error inferring difficulty: %s", e)
         difficulty = DifficultyInferSchema(
-            difficulty=config.task_infer_default_fallback, reason="Fallback"
+            difficulty=config.agent.infer_default_fallback, reason="Fallback"
         )
-    llm.reset_customs()
     return difficulty
 
 
@@ -49,4 +48,4 @@ def convert_difficulty(difficulty: DifficultyInferSchema) -> Difficulty:
         case 2:
             return Difficulty.TOOL_ASSISTED
         case 3:
-            return manager.get_config().task_infer_agent_mode
+            return manager.get_config().agent.default_difficulty_fallback

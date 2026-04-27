@@ -1,16 +1,19 @@
-from abc import ABC, abstractmethod
 import logging
+from abc import ABC, abstractmethod
 from typing import AsyncIterator, Optional
 
 from langchain_core.messages import AIMessage, BaseMessage
 from pydantic import BaseModel
-from core.registry import LLMTool
 
-from core.config import manager
+from core.config import ModelInfo, manager
+from core.registry import LLMTool
 
 
 class LLMBackend(ABC):
     """LLM backend base class."""
+
+    @abstractmethod
+    def __init__(self, model: ModelInfo) -> None: ...
 
     @abstractmethod
     def stream(
@@ -32,51 +35,24 @@ class LLMBackend(ABC):
     ) -> T:
         """Returns structured output as defined by the structure parameter."""
 
-    @abstractmethod
-    def reset_customs(self):
-        """Reset custom configuration for the back-end to config values."""
 
-    @abstractmethod
-    def set_model(self, model: str):
-        """Set custom model."""
-
-    @abstractmethod
-    def set_temperature(self, temperature: float):
-        """Set custom temperature."""
-
-    @abstractmethod 
-    def set_thinking(self, level: str | None):
-        """Set custom thinking level"""
-
-
-def get_backend() -> LLMBackend:
+def get_backend(model: ModelInfo) -> LLMBackend:
     """
     Get LLM backend based on the current profile.
     """
+    from core.backends.litellm import LiteLLMBackend
+    from core.backends.openai import OpenAIBackend
+    from core.backends.vertexai import VertexAIBackend
 
     logger = logging.getLogger(__name__)
 
-    match manager.get_config().llm_provider:
+    match model.provider:
         case "openai":
-            return _manager.openai
+            return OpenAIBackend(model)
         case "vertexai":
-            return _manager.vertexai
+            return VertexAIBackend(model)
         case "litellm":
-            return _manager.litellm
+            return LiteLLMBackend(model)
 
     logger.error("Invalid back-end name, defaulting to OpenAI")
-    return _manager.openai
-
-
-class BackendManager:
-    def __init__(self) -> None:
-        from core.backends.litellm import LiteLLMBackend
-        from core.backends.openai import OpenAIBackend
-        from core.backends.vertexai import VertexAIBackend
-
-        self.openai = OpenAIBackend()
-        self.vertexai = VertexAIBackend()
-        self.litellm = LiteLLMBackend()
-
-
-_manager = BackendManager()
+    return OpenAIBackend(model)

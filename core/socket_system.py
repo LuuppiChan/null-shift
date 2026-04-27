@@ -1,12 +1,13 @@
 import asyncio
 import json
 import logging
+
 import zmq.asyncio
 from zmq.asyncio import Socket
 
+from core.config import manager
 from global_tools import Signal
 from global_types import BusMessage
-from core.config import manager
 
 logger = logging.getLogger(__name__)
 
@@ -18,19 +19,19 @@ class SocketOut:
         self.sent = Signal(BusMessage)
         self._ctx = zmq.asyncio.Context()
         self._socket: Socket = self._ctx.socket(zmq.PUB)
-        self._socket.bind(manager.get_config().zmq_output_bind)
+        self._socket.bind(manager.get_config().socket.output)
 
         self._lock = asyncio.Lock()  # Prevent race conditions during rebind
-        self._current_bind = manager.get_config().zmq_output_bind
+        self._current_bind = manager.get_config().socket.output
 
     async def _ensure_rebind(self):
-        new_bind = manager.get_config().zmq_output_bind
+        new_bind = manager.get_config().socket.output
         # Double-checked locking: The first check avoids lock overhead during
         # normal operation; the second check (inside the lock) prevents
         # race conditions if multiple tasks trigger a rebind simultaneously.
         if new_bind != self._current_bind:
             async with self._lock:
-                new_bind = manager.get_config().zmq_output_bind
+                new_bind = manager.get_config().socket.output
                 if new_bind != self._current_bind:
                     try:
                         logger.info("Socket updated, rebinding...")

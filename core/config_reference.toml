@@ -1,0 +1,330 @@
+[llm]
+
+# Vertex AI project ID.
+# Default: ""
+vertexai_project_id = ""
+
+# Vertex AI location.
+# Default: "global"
+vertexai_location = "global"
+
+# LiteLLM provider (optional).
+# Default: None
+# litellm_provider = "anthropic"
+
+# A list of model configurations that can be referred to by integer index.
+# Default: []
+#
+# Examples:
+#
+# [[llm.model_tiers]]
+# provider = "openai"
+# name = "gpt-4o"
+# temperature = 0.5
+#
+# [[llm.model_tiers]]
+# provider = "vertexai"
+# name = "gemini-1.5-pro"
+#
+# [[llm.model_tiers]]
+# provider = "litellm"
+# name = "claude-3-opus-20240229"
+# max_tokens = 4096
+
+
+# Default core-wide model.
+# This is the model used when there are no overrides.
+[llm.default]
+
+# Who gives you the access to the LLM model?
+# openai | vertexai | litellm
+provider = "openai"
+
+# Custom URL to connect to.
+# Default: None
+# url = "https://api.openai.com/v1"
+
+# Api key for your account
+# Default: None
+api_key = ""
+
+# Model name like "gpt-4"
+# or integer index of the models tier list (eg. 0)
+name = ""
+
+# How big brains the model should have?
+# Note that the model must support thinking/reasoning
+# It's not recommended that you set this global field.
+# Default: None
+# reasoning_effort = "high"
+
+# Temperature for sampling. (0.0 to 2.0 or so depending on provider)
+# Default: None
+# temperature = 0.7
+
+# Top p for nucleus sampling.
+# Default: None
+# top_p = 0.9
+
+# Presence penalty.
+# Default: None
+# presence_penalty = 0.0
+
+# Frequency penalty.
+# Default: None
+# frequency_penalty = 0.0
+
+# Maximum number of tokens to generate.
+# Default: None
+# max_tokens = 4096
+
+
+[llm.models]
+
+# Model overrides to use for specific tasks.
+# Can be a string, an integer index of model_tiers, or an inline dictionary.
+#
+# Example using string: task_infer = "gpt-4o-mini"
+# Example using index: task_infer = 0
+# Example using dict: task_infer = { provider = "vertexai", name = "gemini-1.5-flash" }
+
+# Model to use for main stream loop
+# Default: None
+# main = ...
+
+# Model to use for task inference.
+# Default: None
+# task_infer = ...
+
+# Model to use for history summary.
+# Default: None
+# history_summary = ...
+
+# Model to use for message summary.
+# Default: None
+# message_summary = ...
+
+
+[stream]
+
+# Default title for batch tasks.
+default_batch_task_title = "Info"
+
+# Maximum number of stream iterations.
+max_iterations = 1000
+
+# Maximum number of retries for stream tasks.
+max_retries = 3
+
+# Delay in seconds between retries.
+retry_delay = 5.0
+
+
+[history]
+
+# Number of history items to keep.
+length = 25
+
+# Path to the history file.
+path = "~/.null-shift/brain/history.json"
+
+# Whether to enable history compression.
+compression = true
+
+# The threshold of messages before compression triggers.
+compression_threshold = 30
+
+# The target length of messages after compression.
+compression_target_length = 15
+
+# Whether to compress individual messages.
+message_compression = true
+
+# Minimum number of messages before message compression triggers.
+message_compression_message_min_length = 10
+
+# Minimum number of characters before message compression triggers.
+message_compression_message_min_char = 5000
+
+
+[agent]
+
+# Default agent mode.
+# autonomous_strict | autonomous_trajectory
+infer_agent_mode = "autonomous_trajectory"
+
+# Default fallback difficulty level.
+# 1 | 2 | 3
+infer_default_fallback = 2
+
+# Default fallback difficulty if infer fails.
+# simple | tool_assisted | autonomous_trajectory | autonomous_strict | infer
+default_difficulty_fallback = "autonomous_trajectory"
+
+# Whether to ignore iteration counts.
+ignore_iterations = false
+
+# Path to the agent data file.
+data_path = "~/.null-shift/brain/agent.json"
+
+# The prompt used when the agent needs to be reminded to continue.
+continue_prompt = "[AGENT SYSTEM]: You haven't indicated completion intent. Continue the task or call the agent_complete_objective tool. Remeber to stay in the tool call loop by calling tools every response!"
+
+
+[tool_config]
+
+# Path to the tools directory.
+path = "tools/"
+
+# Whether to search recursively in the tools directory.
+recursive = false
+
+# Timeout per module in seconds.
+per_module_timeout = 2.0
+
+# Minimum delay between tool refreshes in seconds.
+min_refresh_delay = 5.0
+
+
+[prompt_config]
+
+# Path to the prompts directory.
+path = "prompts/"
+
+# Whether to search recursively in the prompts directory.
+recursive = false
+
+# List of file extensions to consider as prompts.
+file_names = [".py", ".md", ".xml"]
+
+# The name of the function to call to collect prompts.
+function_name = "collect"
+
+# Timeout for the collect function in seconds.
+function_timeout = 0.5
+
+
+[prompts]
+
+# Prompt used for inferring the task difficulty.
+task_infer = '''You are an AI assistant that specializes in classifying user requests based on their complexity and requirements.
+
+Your task is to classify the user's input into one of the following categories:
+
+# Categories
+
+> Most questions fall to the Tool-Assisted Task category ("2").
+
+> If you're unsure, choose option "3".
+
+## 1. Simple Task
+The task can be completed using only the model's internal knowledge, without needing external tools, real-time data, or research.
+
+## 2. Tool-Assisted Task
+The task requires calling external tools or APIs (e.g., web search, calendar integration, file manipulation, command execution, window management) to complete a direct action.
+
+## 3. Autonomous Agent Task
+The task is complex and requires a multi-step plan, extensive research, synthesis of information from multiple sources, or complex reasoning. Some tasks that would fall into this category:
+- Multi-step autonomous web tasks.
+- Tasks that take more than 5 tool calls.
+
+# Output
+
+## Examples
+
+### Simple Task
+```
+User: What time is it?
+Response: {
+  "difficulty": 1,
+  "reason": "Some common context is automatically provided such as time, date, ongoing events and computer state."
+}
+```
+
+### Tool-Assisted Task
+```
+User: Can you add this event I'm looking at to my calendar?
+Response: {
+  "difficulty": 2,
+  "reason": "The AI needs a screenshot tool and calendar editing tool to complete this task."
+}
+```
+
+### Autonomous Agent Task
+```
+User: Can you create a plan for a 2 week Japan trip?
+Response: {
+  "difficulty": 3,
+  "reason": "This task requires complex planning, research and reasoning to be completed."
+}
+```'''
+
+# Prompt used for compressing history.
+history_compression = '''You are a memory-compression subsystem for an autonomous AI agent. Your task is to summarize the provided conversation log (which contains Human, AI, and Tool messages) into a dense, highly informative context block.
+
+This summary will be prepended to the main AI agent's future prompts to serve as its memory of past events.
+
+CRITICAL DIRECTIVES:
+1. Retain the Core Objective: What is the user ultimately trying to accomplish?
+2. Preserve Crucial Data: Extract and keep specific file paths, URLs, code snippets, names, IDs, or environmental facts discovered via tools. Do not abstract these away.
+3. Track Progress: Briefly state what actions have successfully been completed.
+4. Note Failures/Constraints: Mention any tool failures or dead ends so the agent doesn't repeat the same mistakes.
+5. Identify Next Steps: Highlight any unresolved tasks, pending questions, or ongoing plans.
+6. Be Concise: Strip out all pleasantries, repetitive errors, and conversational filler. Use bullet points for readability.
+
+OUTPUT FORMAT:
+**User Objective:** [Brief statement of the overarching goal]
+**Established Context:** [Bullet points of crucial facts, exact paths, and extracted data]
+**Actions Taken:** [Brief list of what was already done/attempted]
+**Current State / Pending:** [What the agent was doing or needs to do right before this cutoff]'''
+
+# Prompt used for compressing individual messages.
+message_compression = '''You are an expert Message Compression Assistant within a larger AI agent system. Your task is to compress long tool call results, logs, and historical messages into highly condensed, information-dense summaries. The output will be read by another AI agent, not a human.
+
+OBJECTIVE: Maximize the signal-to-noise ratio. Retain 100% of the critical facts while using the absolute minimum number of tokens.
+
+RULES:
+1. NO CONVERSATIONAL FILLER: Do not use phrases like "The tool returned...", "Here is the summary...", or "The message says...". Start immediately with the data.
+2. PRESERVE EXACT DATA: Never generalize numbers, IDs, names, file paths, URLs, or error codes. Keep them exact.
+3. CAPTURE STATES: Clearly indicate if a tool call was a SUCCESS, FAILURE, or PARTIAL SUCCESS.
+4. REMOVE REDUNDANCY: If a log repeats the same error or status 10 times, state it once and note the repetition count.
+5. FORMAT: Use dense bullet points or key-value pairs for readability by the downstream agent.'''
+
+
+[permissions]
+
+# List of words considered as affirmative.
+yes_words = ["yes", "yeah", "yep", "sure", "ok", "okay", "do it", "go ahead", "proceed"]
+
+# List of words considered as negative.
+no_words = ["no", "nope", "nah", "cancel", "stop", "don't", "do not", "dont", "abort"]
+
+# Timeout in seconds to wait for a permission response.
+timeout = 30.0
+
+
+[socket]
+
+# The ZMQ input socket address.
+input = "tcp://*:5555"
+
+# The ZMQ output socket address.
+output = "tcp://*:5556"
+
+# Default topic for command responses.
+default_response_topic = "response"
+
+
+[log]
+
+# List of libraries to silence in logs.
+silenced_libraries = []
+
+# Logging level (e.g., INFO, DEBUG).
+level = "INFO"
+
+# Whether to log to a file.
+to_file = false
+
+# Path to the log file.
+file_path = "core.log"
