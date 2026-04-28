@@ -1,3 +1,4 @@
+from datetime import datetime
 import logging
 import readline
 from concurrent.futures import ThreadPoolExecutor
@@ -65,9 +66,13 @@ class TextChat:
                     last_was_reason = bool(reasoning)
                 case MessageTopic.TOOL_CALL:
                     tool_name = message.payload.get("tool_name", "No name")
-                    args = "\n".join([f"    {k}={v}" for k, v in message.payload.get("args", {}).items()])
+                    args = "\n".join(
+                        [
+                            f"    {k}={colored(v, attrs=['bold'])}"
+                            for k, v in message.payload.get("args", {}).items()
+                        ]
+                    )
                     print(colored(f"\nTOOL: [{tool_name}] called\n{args}", "dark_grey"))
-                    # print("\n".join([f"   {k}: {v}" for k, v in message.payload.get("args", {})]))
                     code = message.payload.get("args", {}).get("code", "")
                     if code:
                         print(colored(code, "green"))
@@ -137,9 +142,20 @@ class TextChat:
                     case "/q" | "/quit":
                         signal.raise_signal(signal.SIGINT)
                         break
+                    case "/h" | "/history":
+                        match arg:
+                            case "rm":
+                                Path(
+                                    "/home/luuppi/.null-shift/brain/history.json"
+                                ).rename(
+                                    f"/home/luuppi/.null-shift/brain/history {datetime.now().strftime('%d-%m-%y %H-%M-%S')}.json"
+                                )
+                                print("History cleaned.")
+                            case _:
+                                print(f"Unknown argument '{arg}'")
                     case "/" | "/help" | _:
                         print(
-                            "Commands: '/abort' (/a), '/difficulty' (/d), '/title' (/t), '/goal' (/g)"
+                            "Commands: '/abort' (/a), '/difficulty' (/d), '/title' (/t), '/goal' (/g), '/quit' (/q), '/history' (/h)"
                         )
                         msg = None
             elif text.startswith("#"):
