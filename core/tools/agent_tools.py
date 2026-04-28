@@ -8,8 +8,7 @@ from typing import Any, Literal
 
 from langchain_core.tools import tool
 
-from core.config import manager, tool_manager
-from global_types import is_autonomous
+from core.config import manager
 
 type Task = dict[Literal["plan", "steps"], str | list[tuple[str, bool]]]
 type Data = dict[str, bool | str | Task | None]
@@ -21,7 +20,7 @@ class NotAutonomous(Exception): ...
 def _data() -> Data:
     """Get agent data."""
     config = manager.get_config()
-    path = Path(config.task_agent_data_path).expanduser().resolve()
+    path = Path(config.agent.data_path).expanduser().resolve()
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
@@ -32,7 +31,7 @@ def _data() -> Data:
 def _save(data: dict[str, Any]):
     """Save agent data"""
     config = manager.get_config()
-    path = Path(config.task_agent_data_path).expanduser().resolve()
+    path = Path(config.agent.data_path).expanduser().resolve()
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()

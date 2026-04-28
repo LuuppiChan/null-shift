@@ -45,13 +45,13 @@ def collect() -> str | None:
     else:
         logger.warning("No task.md file found.")
 
-    file = Path(manager.get_config().task_agent_data_path).expanduser().resolve()
+    file = Path(manager.get_config().agent.data_path).expanduser().resolve()
     if file.exists():
         text = file.read_text()
         data: dict = json.loads(text)
         goal = data.get("goal")
         if goal:
-            task_at_hand.add_part(goal, "user_goal", "Goal of the current task.")
+            task_at_hand.add_part(goal, "current_goal", "Goal of the current task.")
 
     if task_at_hand:
         parts.append(task_at_hand.compile())

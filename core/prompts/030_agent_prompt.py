@@ -156,14 +156,14 @@ def collect() -> str | None:
     logger = logging.getLogger(__name__)
 
     config = manager.get_config()
-    agent_data = Path(config.task_agent_data_path).expanduser().resolve()
+    agent_data = Path(config.agent.data_path).expanduser().resolve()
     try:
         data: dict[str, Difficulty] = loads(agent_data.read_text())
     except FileNotFoundError:
         data = {}
     assert isinstance(data, dict)
     difficulty: Difficulty = data.get(
-        "difficulty", manager.get_config().task_default_difficulty_fallback
+        "difficulty", manager.get_config().agent.default_difficulty_fallback
     )
     selected: str
     match difficulty:

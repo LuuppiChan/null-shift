@@ -10,7 +10,7 @@ import magic
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.tools import tool
 
-from core.config import tool_manager
+from core.config import manager, tool_manager
 from core.helpers import compress_audio, compress_image, compress_video, get_permission
 from core.helpers import enforce_character_limit as _enforce_character_limit
 from global_types import run_killable
@@ -189,7 +189,9 @@ def file_read(
         from core.backends import get_backend
         from core.backends.vertexai import VertexAIBackend
 
-        if isinstance(get_backend(), VertexAIBackend):
+        cfg = manager.get_config()
+        model = cfg.get_model(cfg.llm.models.main)
+        if isinstance(get_backend(model), VertexAIBackend):
             data = base64.b64encode(path.read_bytes()).decode()
             content_list.append(
                 {

@@ -94,6 +94,7 @@ def run_command(
     return enforce_character_limit(piped)
 
 
+# Make this to support scratchpad instead of hard-coded desktop
 def _is_in_desktop(target_path: Path) -> bool:
     """
     A separate check to verify if the given path is located
