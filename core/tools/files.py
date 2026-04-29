@@ -73,7 +73,8 @@ def _validate_and_resolve_path(
                 "",
                 "Tool error, path was empty when it was expected to be a path to an artifact.",
             )
-        return resolved_path, None
+        # artifact path must be resolved at some point
+        return str(Path(resolved_path).expanduser().resolve()), None
 
     if not _is_allowed(file_path):
         action_str = "read" if action == "read" else "edited or written to"
@@ -89,7 +90,8 @@ def _validate_and_resolve_path(
             if not get_permission(cfg.file_prompt_read_prompt.format(file_path)):
                 return "", f"User declined the request to read {file_path}"
 
-    return str(file_path), None
+    # Resolves the file path just in case.
+    return str(Path(file_path).expanduser().resolve()), None
 
 
 @tool

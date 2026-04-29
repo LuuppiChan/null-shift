@@ -9,7 +9,7 @@ async def get_agent_dom(page: Page):
     agent_text = await page.evaluate(r"""() => {
         let idCounter = 1;
 
-        const processNode = (node, hasInteractiveParent = false, inheritedRole = '') => {
+        const processNode = (node, hasInteractiveParent = false, inheritedRole = '', isInsideRichText = false) => {
             if (node.nodeType === Node.TEXT_NODE) {
                 let text = node.textContent.replace(/\s+/g, ' ');
                 if (text === ' ') return ' ';
@@ -37,10 +37,15 @@ async def get_agent_dom(page: Page):
             else if (tag === 'video' && !currentRole) currentRole = 'video';
 
             let isInt = false;
+            let isRichText = false;
             try {
                 // 3. Tell the script that <video> is a targetable, interactive element
                 if (['a', 'button', 'input', 'select', 'textarea', 'img', 'video'].includes(tag)) isInt = true;
                 else if (node.hasAttribute('onclick') || node.getAttribute('role') === 'button') isInt = true;
+                else if (node.isContentEditable || node.getAttribute('role') === 'textbox') {
+                    isInt = true;
+                    isRichText = true;
+                }
                 else {
                     const style = window.getComputedStyle(node);
                     if (style.cursor === 'pointer') {
@@ -58,13 +63,14 @@ async def get_agent_dom(page: Page):
             }
 
             let childrenText = [];
-            const passInteractiveState = hasInteractiveParent || isInt;
+            const passInteractiveState = hasInteractiveParent || (isInt && !isRichText);
+            const passIsInsideRichText = isInsideRichText || isRichText;
 
             if (tag === 'iframe') {
                 try {
                     let iframeBody = node.contentDocument && node.contentDocument.body;
                     if (iframeBody) {
-                        let iframeRes = processNode(iframeBody, passInteractiveState, currentRole);
+                        let iframeRes = processNode(iframeBody, passInteractiveState, currentRole, passIsInsideRichText);
                         if (iframeRes) childrenText.push(iframeRes);
                     } else {
                         childrenText.push(" [IFRAME: Cross-Origin Restricted] ");
@@ -74,7 +80,7 @@ async def get_agent_dom(page: Page):
                 }
             } else {
                 for (let child of node.childNodes) {
-                    let childRes = processNode(child, passInteractiveState, currentRole);
+                    let childRes = processNode(child, passInteractiveState, currentRole, passIsInsideRichText);
                     if (childRes) childrenText.push(childRes);
                 }
             }
@@ -117,10 +123,22 @@ async def get_agent_dom(page: Page):
                             return ` [${currentId}] INPUT_FIELD (value: "${val}") `;
                         }
                     }
+                    else if (isRichText) {
+                        let val = node.textContent.substring(0, 1000).replace(/\s+/g, ' ').trim() || label || "";
+                        if (node.textContent.length > 1000) val += "...";
+
+                        if (combinedText.match(/\[\d+\]/)) {
+                            return ` [${currentId}] RICH_TEXT_EDITOR (value: "${val}") ${combinedText}`;
+                        }
+                        return ` [${currentId}] RICH_TEXT_EDITOR (value: "${val}") `;
+                    }
                     else if (currentRole === 'link') {
                         return ` [${currentId}] LINK (${label || "Unlabeled"}) `;
                     }
                     else if (currentRole === 'image') {
+                        if (isInsideRichText) {
+                            return ` [${currentId}] RICH_TEXT_IMAGE (${label || "Unlabeled"}) `;
+                        }
                         return ` [${currentId}] IMAGE (${label || "Unlabeled"}) `;
                     }
                     // 4. Explicitly format the Video output for the LLM
@@ -203,8 +221,19 @@ async def fill_input(
     locator = await _get_locator(page, element_id)
 
     try:
-        # .fill() automatically clears the existing text first
-        await locator.fill(text, timeout=3000)
+        is_rich_text = await locator.evaluate(
+            "(el) => el.isContentEditable || el.getAttribute('role') === 'textbox'"
+        )
+
+        if is_rich_text:
+            await locator.click(timeout=3000)
+            await page.keyboard.press("Control+A")
+            await page.keyboard.press("Meta+A")
+            await page.keyboard.press("Backspace")
+            await page.keyboard.type(text, delay=10)
+        else:
+            # .fill() automatically clears the existing text first
+            await locator.fill(text, timeout=3000)
 
         if press_enter:
             await locator.press("Enter")
