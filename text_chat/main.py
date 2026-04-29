@@ -137,22 +137,28 @@ class TextChat:
                         title = arg
                         msg = None
                     case "/goal" | "/g":
-                        goal = arg
+                        goal = arg if arg else None
                         msg = None
                     case "/q" | "/quit":
                         signal.raise_signal(signal.SIGINT)
                         break
                     case "/h" | "/history":
                         match arg:
-                            case "rm":
+                            case "mv":
                                 Path(
                                     "/home/luuppi/.null-shift/brain/history.json"
                                 ).rename(
                                     f"/home/luuppi/.null-shift/brain/history {datetime.now().strftime('%d-%m-%y %H-%M-%S')}.json"
                                 )
-                                print("History cleaned.")
+                                print("History moved.")
+                            case "rm":
+                                Path(
+                                    "/home/luuppi/.null-shift/brain/history.json"
+                                ).unlink(missing_ok=True)
+                                print("History deleted.")
                             case _:
                                 print(f"Unknown argument '{arg}'")
+                        msg = None
                     case "/" | "/help" | _:
                         print(
                             "Commands: '/abort' (/a), '/difficulty' (/d), '/title' (/t), '/goal' (/g), '/quit' (/q), '/history' (/h)"
@@ -170,7 +176,6 @@ class TextChat:
                     ).model_dump(),
                 )
                 title = None
-                goal = None
 
             if msg:
                 print(f"Sending {msg.model_dump()}")
