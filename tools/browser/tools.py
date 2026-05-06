@@ -213,11 +213,17 @@ async def click_element(page: Page, element_id: int) -> str:
 
 
 async def fill_input(
-    page: Page, element_id: int, text: str, press_enter: bool = False
+    page: Page,
+    element_id: int,
+    text: str,
+    press_enter: bool = False,
+    overwrite: bool = True,
 ) -> str:
     """
     Clears an input field or textarea and types the provided text into it.
+    Overwrite clears the field. If it's off, the content is appended.
     """
+    # google docs text not working.
     locator = await _get_locator(page, element_id)
 
     try:
@@ -227,13 +233,21 @@ async def fill_input(
 
         if is_rich_text:
             await locator.click(timeout=3000)
-            await page.keyboard.press("Control+A")
-            await page.keyboard.press("Meta+A")
-            await page.keyboard.press("Backspace")
-            await page.keyboard.type(text, delay=10)
+            if overwrite:
+                await page.keyboard.press("Control+A")
+                await page.keyboard.press("Meta+A")
+                await page.keyboard.press("Backspace")
+            else:
+                await page.keyboard.press("Control+A")
+                await page.keyboard.press("Meta+A")
+                await page.keyboard.press("ArrowRight")
+            await page.keyboard.type(text, delay=5)
         else:
-            # .fill() automatically clears the existing text first
-            await locator.fill(text, timeout=3000)
+            if overwrite:
+                # .fill() automatically clears the existing text first
+                await locator.fill(text, timeout=3000)
+            else:
+                await locator.press_sequentially(text, timeout=3000)
 
         if press_enter:
             await locator.press("Enter")

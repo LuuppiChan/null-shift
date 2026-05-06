@@ -11,6 +11,9 @@ from playwright.async_api import (
     Playwright,
     async_playwright,
 )
+from playwright.async_api import (
+    Error as PlaywrightError,
+)
 
 from global_types import BusMessage
 from tools.browser.config import manager
@@ -35,21 +38,65 @@ os.environ["NODE_OPTIONS"] = "--no-deprecation"
 logger = logging.getLogger(__name__)
 logging.basicConfig(level="INFO")
 
+# Doesn't handle browser shutting down and opening
+# If crashes, will freeze the core.
+
 
 class BrowserControl:
     def __init__(self) -> None:
         self.port = 9222
-        self.p: Playwright
-        self.browser: Browser
-        self.ctx: BrowserContext
-        self.sock: zmq.asyncio.Socket
+        self.p: Playwright | None = None
+        self.browser: Browser | None = None
+        self.ctx: BrowserContext | None = None
+        self.sock: zmq.asyncio.Socket | None = None
+        self._connected = False
+        self._playwright_context_manager = None
+
+    async def connect_browser(self) -> bool:
+        """Attempt to connect to the browser. Returns True if successful."""
+        if self._connected and self.browser and self.browser.is_connected():
+            return True
+
+        try:
+            logger.info("Connecting to browser...")
+            if not self.p:
+                self._playwright_context_manager = async_playwright()
+                self.p = await self._playwright_context_manager.__aenter__()
+
+            self.browser = await self.p.chromium.connect_over_cdp(
+                f"http://localhost:{self.port}"
+            )
+
+            def on_disconnect(_):
+                logger.warning("Browser disconnected.")
+                self._connected = False
+
+            self.browser.on("disconnected", on_disconnect)
+
+            self.ctx = self.browser.contexts[0]
+            self._connected = True
+            logger.info("Connected to browser.")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to connect to browser: {e}")
+            self._connected = False
+            return False
 
     async def active_page(self) -> Page | None:
         """Get current active page."""
-        api_ctx = await self.p.request.new_context()
-        response = await api_ctx.get(f"http://localhost:{self.port}/json/list")
-        targets = await response.json()
-        await api_ctx.dispose()
+        if not self._connected or not self.p or not self.ctx:
+            return None
+
+        try:
+            api_ctx = await self.p.request.new_context()
+            response = await api_ctx.get(
+                f"http://localhost:{self.port}/json/list", timeout=2000
+            )
+            targets = await response.json()
+            await api_ctx.dispose()
+        except Exception as e:
+            logger.error(f"Error fetching active page targets: {e}")
+            return None
 
         active_id = None
         for target in targets:
@@ -78,18 +125,22 @@ class BrowserControl:
         return None
 
     async def run(self):
-        async with async_playwright() as p:
-            # init stuff
-            self.p = p
-            logger.info("Connecting to browser...")
-            browser = await p.chromium.connect_over_cdp(f"http://localhost:{self.port}")
-            logger.info("Connected")
-            self.browser = browser
-            ctx = browser.contexts[0]
-            self.ctx = ctx
+        # Initial connection attempt, but we'll retry later if it fails
+        await self.connect_browser()
 
-            # actual code
-            async for msg in self.listen():
+        async for msg in self.listen():
+            try:
+                # Ensure we are connected before processing
+                if not await self.connect_browser():
+                    await self.send(
+                        "Error: Browser is not running or unreachable. Please start the browser and try again."
+                    )
+                    continue
+
+                if self.ctx is None:
+                    await self.send("Error: Browser context not initialized.")
+                    continue
+
                 match msg.action:
                     case Action.LIST_TABS:
                         tabs: list[dict[str, int | bool | str]] = []
@@ -146,6 +197,7 @@ class BrowserControl:
                         "Error: No active page available. The browser might have no open tabs, or the current tab crashed/is restricted. Use the 'browser_new_tab' tool to open a fresh page."
                     )
                     continue
+
                 match msg.action:
                     case Action.DOM:
                         await self.send(await get_agent_dom(page))
@@ -183,7 +235,23 @@ class BrowserControl:
                     case Action.VIDEO_CONTROL:
                         await self.send(await control_video(page, **msg.kwargs))
 
+            except PlaywrightError as e:
+                logger.error(f"Playwright error processing action {msg.action}: {e}")
+                # Playwright specific errors (e.g. timeout, target closed)
+                await self.send(f"Error: Browser interaction failed: {str(e)}")
+            except Exception as e:
+                logger.exception(
+                    f"Unexpected error processing action {msg.action}: {e}"
+                )
+                # General exceptions to prevent core freeze
+                await self.send(
+                    f"Error: An unexpected internal error occurred: {str(e)}"
+                )
+
     async def send(self, value: dict[str, Any] | str):
+        if self.sock is None:
+            logger.error("Cannot send message, socket is not initialized")
+            return
         self.sock.send_multipart(
             BusMessage(topic=Action.RETURN, payload={"result": value}).encoded()
         )
@@ -193,22 +261,34 @@ class BrowserControl:
         sock = ctx.socket(zmq.REP)
         sock.bind(manager.get_config().socket_path)
         self.sock = sock
-        while True:
-            frames = await sock.recv_multipart()
-            message: BusMessage | None = BusMessage.decoded(frames)
-            if message is None:
-                logger.error("Error parsing bus message.")
-                continue
-            action = BrowserMessage.from_bus_msg(message)
-            if action is None:
-                logger.error("Error parsing BrowserMessage.")
-                continue
-            yield action
+        try:
+            while True:
+                frames = await sock.recv_multipart()
+                message: BusMessage | None = BusMessage.decoded(frames)
+                if message is None:
+                    logger.error("Error parsing bus message.")
+                    # We must reply to keep REP/REQ pattern in sync
+                    await self.send("Error: Invalid bus message received.")
+                    continue
+                action = BrowserMessage.from_bus_msg(message)
+                if action is None:
+                    logger.error("Error parsing BrowserMessage.")
+                    await self.send("Error: Invalid browser action format.")
+                    continue
+                yield action
+        finally:
+            if self._playwright_context_manager:
+                await self._playwright_context_manager.__aexit__(None, None, None)
+            sock.close()
+            ctx.term()
 
 
 def run():
     bc = BrowserControl()
-    asyncio.run(bc.run())
+    try:
+        asyncio.run(bc.run())
+    except KeyboardInterrupt:
+        logger.info("Shutting down browser control...")
 
 
 if __name__ == "__main__":
