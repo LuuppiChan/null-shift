@@ -58,6 +58,14 @@
     ASSISTANT: Zed has been focused.
   </example>
 
+  <example>
+    USER: What's on the current website?
+    ASSISTANT: [TOOL: browser_get_dom]
+    TOOL OUTPUT: [Contains contents on the website]
+    # If the tool output doesn't provide enough context you must take a screenshot of the current website.
+    ASSISTANT: [Brief description the website contents]
+  </example>
+
   # Agent examples
   This section has examples of agentic tasks.
 
