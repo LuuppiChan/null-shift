@@ -14,7 +14,7 @@ def collect() -> str | None:
     )
     time = PromptHelper("time_context", "Current time and data about passed events")
     time.add_part(data.datetime(), "current_date_time")
-    time.add_part(data.recent_events(10), "recent_events")
+    # time.add_part(data.recent_events(10), "recent_events")
     prompt.add_part(time)
     prompt.add_part(data.home_path(), "user_home_path")
     prompt.add_part(
