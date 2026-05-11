@@ -10,7 +10,7 @@ import core.config
 import core.log_manager
 from core.config import CoreConfig, manager, state
 from global_types import BusMessage
-from core.vector import Vector
+import core.vector
 import core.core_data
 
 logger = logging.getLogger(__name__)
@@ -86,7 +86,8 @@ async def main():
     handle_signals()
 
     input_queue: asyncio.Queue[BusMessage] = asyncio.Queue()
-    vector = Vector(input_queue)
+    vector = core.vector.Vector(input_queue)
+    core.vector.vector = vector
 
     logger.info("Starting listener")
     listen_task = asyncio.create_task(listener_loop(input_queue), name="listen")

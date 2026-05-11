@@ -234,7 +234,7 @@ class Vector:
                 i,
                 max_iterations,
                 retries,
-                config.stream.max_iterations,
+                config.stream.max_retries,
             )
             try:
                 full_response = await self._process_llm_stream(tools)
@@ -247,11 +247,11 @@ class Vector:
                 logger.debug("Stream hisotory at error time: %s", self.history.messages)
                 retries += 1
                 logger.info("Stream retries: %s/%s", retries, config.stream.max_retries)
-                await asyncio.sleep(config.stream.retry_delay)
-                if retries >= config.stream.max_iterations:
+                if retries >= config.stream.max_retries:
                     logger.error("Max retries reached, aborting stream.")
                     break
                 else:
+                    await asyncio.sleep(config.stream.retry_delay)
                     continue
 
             # Reset back after successful stream
@@ -271,18 +271,22 @@ class Vector:
                     msg = full_response.content
                 elif isinstance(full_response.content, list):
                     if full_response.content:
-                        if isinstance(full_response.content[0], str):
-                            # check above confirms this
-                            msg = "".join(cast(list[str], full_response.content))
-                        else:
-                            for block in full_response.content:
-                                # Never is a list of strings, look above
+                        for block in full_response.content:
+                            # Never is a list of strings, look above (now deleted)
+                            # What the fuck it was a list of strings.
+                            # If the first chunk is not a string it goes here.
+                            if isinstance(block, str):
+                                msg += block
+                            elif isinstance(block, dict):
                                 for (
                                     k,
                                     v,
-                                ) in block.items():  # pyright: ignore[reportAttributeAccessIssue]
+                                ) in block.items():
                                     if k == "text":
                                         msg += str(v)
+                            else:
+                                logger.error("Unhandled message block: %s", block)
+                        full_response.content = msg
                     else:
                         msg = "[Empty content block]"
                 else:
@@ -562,3 +566,8 @@ class Vector:
                 )
             case _:
                 logger.warning("Invalid command: %s", command.command)
+
+
+# global reference to the main vector instance
+# this is assigned by the main function.
+vector: Vector
