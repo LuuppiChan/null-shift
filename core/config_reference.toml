@@ -12,21 +12,21 @@ vertexai_location = "global"
 # Default: None
 # litellm_provider = "anthropic"
 
-# A list of model configurations that can be referred to by integer index.
-# Default: []
+# A table of model configurations that can be referred to by the key.
+# Default: {}
 #
 # Examples:
 #
-# [[llm.model_tiers]]
+# [llm.model_tiers.gpt]
 # provider = "openai"
 # name = "gpt-4o"
 # temperature = 0.5
 #
-# [[llm.model_tiers]]
+# [llm.model_tiers.gemini]
 # provider = "vertexai"
 # name = "gemini-1.5-pro"
 #
-# [[llm.model_tiers]]
+# [llm.model_tiers.claude]
 # provider = "litellm"
 # name = "claude-3-opus-20240229"
 # max_tokens = 4096
@@ -45,11 +45,35 @@ provider = "openai"
 # url = "https://api.openai.com/v1"
 
 # Api key for your account
+# Oh my fucking god it's python inside toml (you can do this!)
+# Note the beginning text is used for detection. Insert '# API_KEY <-'
+# at the beginning of your string for it to be detected as a script.
+# api_key = """# API_KEY <-
+#
+# if not globals().get("credentials"):
+#   from google.auth import default
+#   credentials, _ = default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+#
+# def get_auth_token():
+#     \"""
+#     Dynamically retrieves the Google Cloud Auth token for Vertex AI.
+#     Returns:
+#         str: The active access token.
+#     \"""
+#     from google.auth.transport.requests import Request
+#     if not credentials.valid:
+#         credentials.refresh(Request())
+#     return credentials.token
+#
+# # assign the api key
+# API_KEY = get_auth_token()
+# """
 # Default: None
 api_key = ""
 
+
 # Model name like "gpt-4"
-# or integer index of the models tier list (eg. 0)
+# or key of the models tier table (eg. "gpt")
 name = ""
 
 # How big brains the model should have?
@@ -85,7 +109,7 @@ name = ""
 # Can be a string, an integer index of model_tiers, or an inline dictionary.
 #
 # Example using string: task_infer = "gpt-4o-mini"
-# Example using index: task_infer = 0
+# Example using key: task_infer = "gpt"
 # Example using dict: task_infer = { provider = "vertexai", name = "gemini-1.5-flash" }
 
 # Model to use for main stream loop

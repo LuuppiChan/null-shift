@@ -7,7 +7,7 @@ Additionally contains runtime state.
 import asyncio
 import logging
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -16,7 +16,8 @@ from global_types import Difficulty
 
 logger = logging.getLogger(__name__)
 
-type ModelIdentifier = str | int | ModelInfo | None
+type ModelIdentifier = str | ModelInfo | None
+API_KEY_GLOBALS: dict[str, Any] = {}
 
 
 class ToolConfig(BaseModel):
@@ -77,6 +78,7 @@ class ToolConfig(BaseModel):
             "ldd",
             "uniq",
             "objdump",
+            "which",
         ]
     )
 
@@ -112,6 +114,22 @@ class ModelInfo(BaseModel):
             deep=True,
         )
 
+    def get_api_key(self) -> str | None:
+        # code must start with '# API_KEY <-'
+        # This is to distinguish from string api key
+        # and tell what the variable name is.
+        if self.api_key is None:
+            return None
+        elif self.api_key.strip().startswith("# API_KEY <-"):
+            try:
+                exec(self.api_key, API_KEY_GLOBALS)
+                return API_KEY_GLOBALS.get("API_KEY", None)
+            except Exception as e:
+                logger.error("Error executing api key: %s", e)
+                return None
+        else:
+            return self.api_key
+
 
 class TaskModels(BaseModel):
     main: ModelIdentifier = None
@@ -122,7 +140,7 @@ class TaskModels(BaseModel):
 
 class LLM(BaseModel):
     default: ModelInfo = Field(default_factory=ModelInfo)
-    model_tiers: list[ModelInfo] = Field(default_factory=list)
+    model_tiers: dict[str, ModelInfo] = Field(default_factory=dict)
 
     vertexai_project_id: str = ""
     vertexai_location: str = "global"
@@ -247,20 +265,9 @@ class CoreConfig(BaseModel):
             return self.llm.default.with_overrides(identifier)
         elif identifier is None:
             return self.llm.default
-        elif isinstance(identifier, (int, str)):
-            try:
-                index = int(identifier)
-                if 0 <= index < len(self.llm.model_tiers):
-                    return self.llm.model_tiers[index]
-                else:
-                    logger.warning(
-                        f"Model tier index '{index}' is out of bounds. Falling back to default."
-                    )
-                    return self.llm.default
-            except ValueError:
-                pass
-        # Should always be str and never int here
-        assert isinstance(identifier, str)
+        elif model := self.llm.model_tiers.get(identifier):
+            return model
+
         return self.get_model(ModelInfo(name=identifier))
 
 

@@ -34,14 +34,12 @@ class OpenAIBackend(LLMBackend):
         self.llm: ChatOpenAI = ChatOpenAI(
             base_url=model.url,
             model=str(model.name),
-            api_key=lambda: str(model.api_key),
+            api_key=lambda: str(model.get_api_key()),
             temperature=model.temperature,
             top_p=model.top_p,
             presence_penalty=model.presence_penalty,
             frequency_penalty=model.frequency_penalty,
-            reasoning_effort=(
-                model.reasoning_effort if model.reasoning_effort else None
-            ),
+            reasoning_effort=model.reasoning_effort if model.reasoning_effort else None,
         )
 
     def stream(

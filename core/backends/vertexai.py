@@ -12,9 +12,10 @@ from core.config import manager
 class VertexAIBackend(LLMBackend):
     def __init__(self, model: ModelInfo) -> None:
         cfg = manager.get_config()
+        api_key = model.get_api_key()
         self.config = {
             "model": model.name,
-            "api_key": model.api_key if model.api_key else None,
+            "api_key": api_key if api_key else None,
             "project": cfg.llm.vertexai_project_id,
             "location": cfg.llm.vertexai_location,
             "temperature": model.temperature,

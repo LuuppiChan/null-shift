@@ -16,7 +16,7 @@ class LiteLLMBackend(LLMBackend):
         self.llm: ChatLiteLLM = ChatLiteLLM(
             api_base=model.url,
             model=str(model.name),
-            api_key=model.api_key,
+            api_key=model.get_api_key(),
             temperature=model.temperature,
             top_p=model.top_p,
             streaming=True,
