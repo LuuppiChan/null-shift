@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 import tomllib
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 type Connection = Callable | Callable[..., Awaitable]
 
@@ -29,7 +29,12 @@ def with_overrides[T: BaseModel](cls: type[T], config_path: Path) -> T | None:
             logger.error("(%s): Config parsing error: %s", config_path, e)
             return None
 
-    return cls(**overrides)
+    try:
+        model = cls(**overrides)
+        return model
+    except ValidationError as e:
+        logger.error("Config validation error: %s", e)
+        return None
 
 
 class ConfigManager[T: BaseModel]:
@@ -41,6 +46,9 @@ class ConfigManager[T: BaseModel]:
 
     def get_config(self) -> T:
         """Get the current program configuration."""
+        # Calling this is apparently quite expensive on system calls
+        # This is also currently blocking.
+        # Another solution would be to spin up an async background task to watch the file.
         if self.path.exists():
             current_mtime = self.path.stat().st_mtime
             if current_mtime > self._last_mtime:
