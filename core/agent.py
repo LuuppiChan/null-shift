@@ -15,6 +15,13 @@ from global_types import Difficulty
 logger = logging.getLogger(__name__)
 
 
+class AgentData(BaseModel):
+    difficulty: Difficulty = Difficulty.TOOL_ASSISTED
+    completed: bool = False
+    goal: str | None = None
+    context: str | None = None
+
+
 class DifficultyInferSchema(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
