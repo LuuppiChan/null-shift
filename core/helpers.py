@@ -60,10 +60,15 @@ class PromptHelper:
         return bool(self.parts)
 
 
-def enforce_character_limit(text: str) -> str:
+def enforce_character_limit(text: str, limit: int | None = None) -> str:
     """Enforce character limit on text outputs."""
-    cfg = tool_manager.get_config()
-    limit = cfg.file_absurd_size_limit
+    if limit is None:
+        cfg = tool_manager.get_config()
+        limit = cfg.file_absurd_size_limit
+
+    if limit <= 0:
+        return text
+
     if limit and len(text) > limit:
         return (
             text[:limit] + f"\n... (output truncated due to character limit of {limit})"
