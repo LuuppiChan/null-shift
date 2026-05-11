@@ -1,5 +1,7 @@
 import asyncio
+import hashlib
 import importlib.util
+import inspect
 import logging
 from pathlib import Path
 from typing import Any, Callable, Optional, cast
@@ -7,14 +9,15 @@ from typing import Any, Callable, Optional, cast
 from langchain_core.messages import SystemMessage
 
 from core.config import CoreConfig, manager
+from core.core_data import LocalData
 from global_types import CachedFile, run_batch_ordered
 
 logger = logging.getLogger(__name__)
 
 
-async def get_context() -> SystemMessage:
+async def get_context(data: LocalData | None = None) -> SystemMessage:
     """Gets current system context."""
-    return await prompt_assembler.get_prompt()
+    return await prompt_assembler.get_prompt(data)
 
 
 class PromptAssembler:
@@ -26,18 +29,25 @@ class PromptAssembler:
         self.prompt_cache: dict[Path, CachedFile] = {}
         manager.config_updated.connect(self.config_updated)
 
-    async def get_prompt(self) -> SystemMessage:
+    async def get_prompt(self, data: LocalData | None = None) -> SystemMessage:
         """Returns full system prompt."""
         await self.refresh_cache()
 
         timeout = manager.get_config().prompt_config.function_timeout
         logger.info("Loading prompt fragments with timeout: %s", timeout)
         files = sorted(self.prompt_cache.values(), key=lambda pf: pf.file.name)
+
+        def mapping(f: CachedFile):
+            if isinstance(f, PythonPromptFile):
+                # update data
+                f.data = data
+            return cast(Callable[[], Any], f.get_contents)
+
         results: list[Optional[str]] = await run_batch_ordered(
             # Fucking type checker I have to cast Any or str to get you working.
             # This function actually might return None, but the type checker thinks
             # it has to return only a string.
-            list(map(lambda f: cast(Callable[[], Any], f.get_contents), files)),
+            list(map(mapping, files)),
             timeout=timeout,
         )
 
@@ -93,7 +103,10 @@ class PromptAssembler:
 class PythonPromptFile(CachedFile):
     def __init__(self, file: Path) -> None:
         super().__init__(file)
-        self.fn_cache: Callable[[], Optional[str]] = lambda: None
+        self.fn_cache: Callable[[], Optional[str]] | Callable[[Optional[LocalData]]] = (
+            lambda: None
+        )
+        self.data: LocalData | None = None
 
     def get_contents(self) -> Optional[str]:
         if not self.file.exists():
@@ -104,7 +117,7 @@ class PythonPromptFile(CachedFile):
 
         if not self.needs_refresh():
             try:
-                result = self.fn_cache()
+                result = self.call_cache()
             except Exception as e:
                 logger.warning(
                     "Error while executing prompt file '%s': %s", self.file.name, e
@@ -112,7 +125,9 @@ class PythonPromptFile(CachedFile):
                 return None
             return result
 
-        module_name = self.file.stem
+        # trick to make program imports work.
+        path_hash = hashlib.md5(str(self.file.resolve()).encode()).hexdigest()[:12]
+        module_name = f"core.tools._plugin_{self.file.stem}_{path_hash}"
 
         spec = importlib.util.spec_from_file_location(module_name, self.file)
         if spec is None or spec.loader is None:
@@ -128,9 +143,9 @@ class PythonPromptFile(CachedFile):
             return None
 
         config = manager.get_config()
-        function: Optional[Callable[[], Optional[str]]] = getattr(
-            module, config.prompt_config.function_name, None
-        )
+        function: Optional[
+            Callable[[], Optional[str]] | Callable[[Optional[LocalData]], Optional[str]]
+        ] = getattr(module, config.prompt_config.function_name, None)
         if function is None:
             logger.warning(
                 "Prompt module %s has no function named %s",
@@ -143,12 +158,26 @@ class PythonPromptFile(CachedFile):
         self.mtime = new_mtime
         self.fn_cache = function
         try:
-            result = function()
+            result = self.call_cache()
         except Exception as e:
             logger.warning("Error executing prompt module '%s': %s", self.file.name, e)
             return None
 
         return result
+
+    def call_cache(self, data: LocalData | None = None) -> str | None:
+        """Call the function cache correctly."""
+        if data is None:
+            data = self.data
+
+        sig = inspect.signature(self.fn_cache)
+        # simple check for now.
+        if len(sig.parameters):
+            fn = cast(Callable[[LocalData | None], str | None], self.fn_cache)
+            return fn(data)
+        else:
+            fn = cast(Callable[[], str | None], self.fn_cache)
+            return fn()
 
 
 prompt_assembler = PromptAssembler()
