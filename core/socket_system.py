@@ -23,6 +23,7 @@ class SocketOut:
 
         self._lock = asyncio.Lock()  # Prevent race conditions during rebind
         self._current_bind = manager.get_config().socket.output
+        self._last_topic: str = ""
 
     async def _ensure_rebind(self):
         new_bind = manager.get_config().socket.output
@@ -46,7 +47,10 @@ class SocketOut:
     async def send(self, message: BusMessage):
         """Send a message to the out socket."""
         await self._ensure_rebind()
-        logger.info("Sending message to topic: %s", message.topic)
+        if self._last_topic != message.topic:
+            logger.info("Sending message to topic: %s", message.topic)
+            self._last_topic = message.topic
+
         logger.debug("Full BusMessage object: %s", message)
         self.sent.emit(message)
         await self._socket.send_multipart(
