@@ -4,6 +4,10 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict, Field
+
+
+from core.agent import AgentData
 from core.config import tool_manager
 from core.socket_system import socket_out
 from global_types import BusMessage, MessageTopic
@@ -154,3 +158,14 @@ class Message:
 
 
 data = Data()
+
+
+class LocalData(BaseModel):
+    """
+    Contains data about the current stream and a reference to the global data.
+    """
+    # just in case global data is arbitrary
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    global_data: Data = data
+    agent_data: AgentData = Field(default_factory=AgentData)
