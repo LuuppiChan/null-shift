@@ -6,6 +6,50 @@ from playwright.async_api import Page
 
 
 async def get_agent_dom(page: Page):
+    # Custom Text Extraction for Google Docs
+    is_google_docs = "docs.google.com/document/" in page.url
+    docs_text = ""
+    if is_google_docs:
+        try:
+            docs_text = await page.evaluate(r"""() => {
+                let textBlocks = [];
+                // Look for common Google Docs line/paragraph classes
+                let nodes = document.querySelectorAll('.kix-lineview, .kix-paragraphrenderer, .kix-wordhtmlgenerator-word-node, [role="paragraph"]');
+                if (nodes.length > 0) {
+                    nodes.forEach(node => {
+                        let textContent = node.innerText || node.textContent;
+                        if (textContent && textContent.trim()) {
+                            textBlocks.push(textContent.replace(/\u200C/g, ''));
+                        }
+                    });
+                }
+                return textBlocks.join('\n');
+            }""")
+
+            # If the DOM is completely canvas rendered, fallback to simulating a copy operation
+            if not docs_text.strip():
+                # Focus the editor canvas
+                editor = page.locator(".kix-appview-editor").first
+                if await editor.count() > 0:
+                    await editor.click(timeout=3000)
+                    await page.keyboard.press("Control+A")
+                    await page.keyboard.press("Meta+A")  # For mac
+                    await page.keyboard.press("Control+C")
+                    await page.keyboard.press("Meta+C")
+
+                    # Unselect
+                    await page.keyboard.press("ArrowRight")
+
+                    # Read clipboard
+                    # Note: this requires clipboard permissions in the browser context
+                    docs_text = await page.evaluate("navigator.clipboard.readText()")
+
+        except Exception as e:
+            docs_text = f"Error reading Google Docs content: {str(e)}"
+
+        if not docs_text.strip():
+            docs_text = "(Document appears empty or text is entirely canvas-rendered and unreadable)"
+
     agent_text = await page.evaluate(r"""() => {
         let idCounter = 1;
 
@@ -22,7 +66,14 @@ async def get_agent_dom(page: Page):
             const tag = node.tagName.toLowerCase();
 
             // 1. Removed 'video' from the ignore list
-            if (['script', 'style', 'noscript', 'svg', 'canvas'].includes(tag)) return '';
+            if (['script', 'style', 'noscript', 'svg', 'canvas'].includes(tag)) {
+                // SPECIAL CASE: Treat Google Docs Editor as interactable
+                if (node.classList && node.classList.contains('kix-appview-editor')) {
+                   // do not return ''
+                } else {
+                    return '';
+                }
+            }
 
             try {
                 const style = window.getComputedStyle(node);
@@ -38,9 +89,14 @@ async def get_agent_dom(page: Page):
 
             let isInt = false;
             let isRichText = false;
+            let isDocsEditor = false;
             try {
                 // 3. Tell the script that <video> is a targetable, interactive element
-                if (['a', 'button', 'input', 'select', 'textarea', 'img', 'video'].includes(tag)) isInt = true;
+                if (node.classList && node.classList.contains('kix-appview-editor')) {
+                    isInt = true;
+                    isDocsEditor = true;
+                }
+                else if (['a', 'button', 'input', 'select', 'textarea', 'img', 'video'].includes(tag)) isInt = true;
                 else if (node.hasAttribute('onclick') || node.getAttribute('role') === 'button') isInt = true;
                 else if (node.isContentEditable || node.getAttribute('role') === 'textbox') {
                     isInt = true;
@@ -95,6 +151,10 @@ async def get_agent_dom(page: Page):
                 try {
                     let currentId = idCounter++;
                     node.setAttribute('data-agent-id', currentId);
+
+                    if (isDocsEditor) {
+                         return ` [${currentId}] GOOGLE_DOCS_EDITOR `;
+                    }
 
                     let label = combinedText.trim();
                     if (!label) {
@@ -173,6 +233,8 @@ async def get_agent_dom(page: Page):
         return rawText.replace(/\n\s*\n/g, '\n').trim();
     }""")
 
+    if is_google_docs:
+        return f"{agent_text}\n\n[Google Docs Content]\n{docs_text}\n[/Google Docs Content]"
     return agent_text
 
 
@@ -223,15 +285,11 @@ async def fill_input(
     Clears an input field or textarea and types the provided text into it.
     Overwrite clears the field. If it's off, the content is appended.
     """
-    # google docs text not working.
+    is_google_docs = "docs.google.com/document/" in page.url
     locator = await _get_locator(page, element_id)
 
     try:
-        is_rich_text = await locator.evaluate(
-            "(el) => el.isContentEditable || el.getAttribute('role') === 'textbox'"
-        )
-
-        if is_rich_text:
+        if is_google_docs:
             await locator.click(timeout=3000)
             if overwrite:
                 await page.keyboard.press("Control+A")
@@ -241,16 +299,35 @@ async def fill_input(
                 await page.keyboard.press("Control+A")
                 await page.keyboard.press("Meta+A")
                 await page.keyboard.press("ArrowRight")
-            await page.keyboard.type(text, delay=5)
+            await page.keyboard.type(text, delay=10)
         else:
-            if overwrite:
-                # .fill() automatically clears the existing text first
-                await locator.fill(text, timeout=3000)
+            is_rich_text = await locator.evaluate(
+                "(el) => el.isContentEditable || el.getAttribute('role') === 'textbox'"
+            )
+
+            if is_rich_text:
+                await locator.click(timeout=3000)
+                if overwrite:
+                    await page.keyboard.press("Control+A")
+                    await page.keyboard.press("Meta+A")
+                    await page.keyboard.press("Backspace")
+                else:
+                    await page.keyboard.press("Control+A")
+                    await page.keyboard.press("Meta+A")
+                    await page.keyboard.press("ArrowRight")
+                await page.keyboard.type(text, delay=5)
             else:
-                await locator.press_sequentially(text, timeout=3000)
+                if overwrite:
+                    # .fill() automatically clears the existing text first
+                    await locator.fill(text, timeout=3000)
+                else:
+                    await locator.press_sequentially(text, timeout=3000)
 
         if press_enter:
-            await locator.press("Enter")
+            if is_google_docs:
+                await page.keyboard.press("Enter")
+            else:
+                await locator.press("Enter")
             return (
                 f"Success: Typed '{text}' into element {element_id} and pressed Enter."
             )

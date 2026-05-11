@@ -74,6 +74,13 @@ class BrowserControl:
             self.browser.on("disconnected", on_disconnect)
 
             self.ctx = self.browser.contexts[0]
+
+            # Ensure the context has permission to read the clipboard for Google Docs fallback
+            try:
+                await self.ctx.grant_permissions(["clipboard-read", "clipboard-write"])
+            except Exception as e:
+                logger.warning(f"Could not grant clipboard permissions: {e}")
+
             self._connected = True
             logger.info("Connected to browser.")
             return True
