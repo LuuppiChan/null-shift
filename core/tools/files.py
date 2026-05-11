@@ -21,6 +21,16 @@ logger = logging.getLogger(__name__)
 artifacts = ["MEMORY.md", "plan.md", "task.md"]
 type Artifacts = Literal[*artifacts]  # pyright: ignore[reportInvalidTypeForm]
 
+SAFE_APP_TYPES = [
+    "application/json",
+    "application/xml",
+    "application/javascript",
+    "application/sql",
+    "application/graphql",
+    "application/x-yaml",
+    "application/toml",
+]
+
 
 def _to_path(artifact: Artifacts) -> str:
     cfg = tool_manager.get_config()
@@ -133,16 +143,7 @@ def file_read(
     path = Path(file_path)
     mime = magic.from_file(path, mime=True)
 
-    if mime.startswith("text/") or mime == "application/xml":
-        lines = path.read_text().splitlines()
-        start_line = round(start_line)
-        if end_line is None:
-            text = lines[start_line:]
-        else:
-            end_line = round(end_line)
-            text = lines[start_line:end_line]
-        content_list.append({"text": _enforce_character_limit("\n".join(text))})
-    elif mime.startswith("image/"):
+    if mime.startswith("image/"):
         content_list.append(
             {
                 "type": "image_url",
@@ -210,7 +211,15 @@ def file_read(
                 doc.page_content = _enforce_character_limit(doc.page_content)
                 content_list.append(doc.to_json())
     else:
-        return _enforce_character_limit(f"Error: Unsupported file type: {mime}")
+        # if mime.startswith("text/") or any([mime.startswith(t) for t in SAFE_APP_TYPES]):
+        lines = path.read_text(errors="replace").splitlines()
+        start_line = round(start_line)
+        if end_line is None:
+            text = lines[start_line:]
+        else:
+            end_line = round(end_line)
+            text = lines[start_line:end_line]
+        content_list.append({"text": _enforce_character_limit("\n".join(text))})
 
     if len(content_list) == 1 and "text" in content_list[0]:
         return content_list[0]["text"]

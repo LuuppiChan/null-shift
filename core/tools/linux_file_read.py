@@ -15,59 +15,20 @@ from core.helpers import enforce_character_limit
 # Is set every time this module is reloaded, I think that's frequent enough.
 allowed_commands = tool_manager.get_config().linux_read_allowed_commands
 
-type PossibleProgram = Literal[*allowed_commands]  # pyright: ignore[reportInvalidTypeForm]
+type PossibleProgram = Literal[
+    *allowed_commands  # pyright: ignore[reportInvalidTypeForm]
+]
 
 
 class Command(TypedDict):
-    program: PossibleProgram
+    program: PossibleProgram | str
     args: list[str] | None
 
 
-@tool
-def run_command(
+def _run_command_safe(
     programs: list[Command],
     timeout: float = tool_manager.get_config().linux_read_command_timeout,
 ) -> str:
-    """
-    This tool allows running the given read-only CLI programs.
-    To pipe input you must put list the programs in order.
-    This does not use bash to execute the tools, but a secure system to check for the executed commands.
-    Always use absolute paths.
-    Piping works by piping stdout or if stdout is empty, stderr is piped.
-
-    Args:
-        programs: list of program objects
-        program: One single program to run, under is a breakdown of the keys
-            program: the name of the program you want to run
-            args: list of arguments to the given program
-        timeout: Per-command timeout to mitigate hanging.
-
-    Examples:
-    Refer to the provided JSON schema for the actual format.
-
-    # simple
-    run_command(
-        {
-            "program": "file",
-            "args": ["/some/file"]
-        }
-    )
-
-    # piping
-    run_command(
-        {
-            "program": "cat",
-            "args": ["/some/path/to/*.txt"]
-        },
-        {
-            "program": "grep",
-            "args": ["-i", "hello"]
-        }
-    )
-
-    # no args
-    run_command({"program": "ls"})
-    """
     # Bytes or string?
     # For now let's use strings.
     # Maybe if we encounter some decoding issue we will use bytes internally.
@@ -90,8 +51,65 @@ def run_command(
             return f"Error running '{p}': {enforce_character_limit(out.stdout or out.stderr or '(No output)')}"
         piped = out.stdout or out.stderr
 
+    cat = (
+        "\n\n[SYSTEM]: Using cat to read files is highly discouraged, use the dedicated file_read tool."
+        if len(programs) == 1 and programs[0].get("program") == "cat"
+        else ""
+    )
+
     # At the end piped is just the output of the last program.
-    return enforce_character_limit(piped)
+    return enforce_character_limit(piped) + cat
+
+
+@tool
+def run_command_safe(
+    programs: list[Command],
+    timeout: float = tool_manager.get_config().linux_read_command_timeout,
+) -> str:
+    """
+    This tool allows running the given white listed CLI programs.
+    This tool is NOT a common program execution tool, but a tool that gives you limited access to the user's system.
+    This tool is annotated with the allowed programs and the programs are most commonly read-only.
+
+    To pipe input you must put list the programs in order.
+    This does not use bash to execute the tools, but a secure system to check for the executed commands.
+    Always use absolute paths.
+    Piping works by piping stdout or if stdout is empty, stderr is piped.
+
+    Args:
+        programs: list of program objects
+        program: One single program to run, under is a breakdown of the keys
+            program: the name of the program you want to run
+            args: list of arguments to the given program
+        timeout: Per-command timeout to mitigate hanging.
+
+    Examples:
+    Refer to the provided JSON schema for the actual format.
+
+    # simple
+    run_command_safe(
+        {
+            "program": "file",
+            "args": ["/some/file"]
+        }
+    )
+
+    # piping
+    run_command_safe(
+        {
+            "program": "cat",
+            "args": ["/some/path/to/*.txt"]
+        },
+        {
+            "program": "grep",
+            "args": ["-i", "hello"]
+        }
+    )
+
+    # no args
+    run_command_safe({"program": "ls"})
+    """
+    return _run_command_safe(programs, timeout)
 
 
 # Make this to support scratchpad instead of hard-coded desktop

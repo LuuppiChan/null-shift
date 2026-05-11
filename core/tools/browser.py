@@ -3,6 +3,7 @@ from typing import Any, Optional
 import zmq
 from langchain_core.tools import tool
 
+from core.helpers import enforce_character_limit
 from global_types import BusMessage
 from tools.browser.config import manager
 from tools.browser.message_types import Action
@@ -51,7 +52,7 @@ def send_browser_request(_action: str, **kwargs: Any) -> Any:
 
 
 @tool
-def browser_get_dom() -> str:
+def browser_get_dom(character_limit: int = 10000) -> str:
     """
     Gets the interactive Document Object Model (DOM) of the current active page.
 
@@ -59,7 +60,7 @@ def browser_get_dom() -> str:
         `browser_get_dom()`
         Returns a string representation of the DOM with interactive elements tagged with their [ID].
     """
-    return send_browser_request(Action.DOM)
+    return enforce_character_limit(send_browser_request(Action.DOM), character_limit)
 
 
 @tool
@@ -75,16 +76,24 @@ def browser_click(element_id: int) -> str:
 
 
 @tool
-def browser_type(element_id: int, text: str, press_enter: bool = False) -> str:
+def browser_type(
+    element_id: int, text: str, press_enter: bool = False, overwrite: bool = True
+) -> str:
     """
     Clears an input field or textarea and types the provided text into it.
+
+    Overwrite controls whether to set the field content or append to it.
 
     Example:
         `browser_type(element_id=4, text="search query", press_enter=True)`
         Types "search query" into input [4] and automatically submits by pressing Enter.
     """
     return send_browser_request(
-        Action.TYPE, element_id=element_id, text=text, press_enter=press_enter
+        Action.TYPE,
+        element_id=element_id,
+        text=text,
+        press_enter=press_enter,
+        overwrite=overwrite,
     )
 
 
@@ -233,24 +242,29 @@ def browser_set_slider(element_id: int, value: str) -> str:
 
 @tool
 def browser_page_screenshot() -> Any:
-    """
-    Takes a full page screenshot and returns it. Usable by multimodal LLMs.
-
-    Example:
-        `browser_page_screenshot()`
-        Returns a dictionary containing the base64 encoded image payload.
-    """
+    """Takes a full page screenshot and returns it. Useful for reading the screen when the browser_get_dom doesn't return enough context."""
     return send_browser_request(Action.PAGE_SCREENSHOT)
 
 
 @tool
 def browser_element_screenshot(element_id: int) -> Any:
     """
-    Takes a screenshot of a specific element and returns it. Usable by multimodal LLMs.
+    Takes a screenshot of a specific element and returns it.
 
-    Example:
-        `browser_element_screenshot(element_id=22)`
-        Takes a bounded screenshot of element 22 (e.g., an image or a captcha).
+    # Example
+    Browser dom:
+    ```
+    Click the one that is a cat.
+    [1] BUTTON (Image)
+    [2] BUTTON (Image)
+    [3] BUTTON (Image)
+    [4] BUTTON (Image)
+    ```
+    You would call browser_element_screenshot for each element on the same turn.
+    `browser_element_screenshot(element_id=1)`
+    `browser_element_screenshot(element_id=2)`
+    `browser_element_screenshot(element_id=3)`
+    `browser_element_screenshot(element_id=4)`
     """
     return send_browser_request(Action.ELEMENT_SCREENSHOT, element_id=element_id)
 
