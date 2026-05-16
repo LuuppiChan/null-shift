@@ -5,7 +5,7 @@ from langchain_core.tools import tool
 
 from core.helpers import enforce_character_limit
 from global_types import BusMessage
-from tools.browser.config import manager
+# from tools.browser.config import manager
 from tools.browser.message_types import Action
 
 # Module-level ZMQ context to avoid creating new contexts for every request
@@ -24,10 +24,11 @@ def send_browser_request(_action: str, **kwargs: Any) -> Any:
         The 'result' field from the browser's response payload.
     """
     # I guess this works lol
-    config = manager.get_config()
+    # config = manager.get_config()
 
     # The browser server binds to e.g., tcp://*:5557, but the client must connect to localhost
-    address = config.socket_path.replace("*", "localhost")
+    # address = config.socket_path.replace("*", "localhost")
+    address = "tcp://localhost:5557"
 
     socket = _zmq_ctx.socket(zmq.REQ)
     socket.connect(address)

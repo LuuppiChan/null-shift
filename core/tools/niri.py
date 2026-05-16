@@ -78,7 +78,8 @@ def set_monitor(state: Literal["on", "off"]) -> str:
     except subprocess.CalledProcessError as e:
         return f"Error setting monitors {state}: {e}"
 
-@tool
+# disabled because causes confusion with browser screenshotting
+# @tool
 def read_screen(area: Literal["monitor", "window"] = "monitor") -> list[dict[str, Any]]:
     """
     Returns a screenshot of the currently focused monitor or window.
