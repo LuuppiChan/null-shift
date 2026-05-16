@@ -19,17 +19,28 @@ ctx = zmq.asyncio.Context()
 
 
 def handle_signals():
+    count = 0
     loop = asyncio.get_running_loop()
 
     def sigterm():
+        nonlocal count
         logger.info("Signal %s – shutting down.", signal.SIGTERM.name)
         state.shutdown_event.set()
+        count += 1
+        if count > 3:
+            logger.critical("Hard exit (3 signals)")
+            exit(1)
 
     loop.add_signal_handler(signal.SIGTERM, sigterm)
 
     def sigint():
+        nonlocal count
         logger.info("Signal %s – shutting down.", signal.SIGINT.name)
         state.shutdown_event.set()
+        count += 1
+        if count > 3:
+            logger.critical("Hard exit (3 signals)")
+            exit(1)
 
     loop.add_signal_handler(signal.SIGINT, sigint)
 
