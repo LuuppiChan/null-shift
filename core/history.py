@@ -28,6 +28,7 @@ class History:
     def __init__(self) -> None:
         self.messages: list[BaseMessage] = []
         self.added = Signal(BaseMessage)
+        self.last_compression: AIMessage | None = None
 
     def with_system_message(self, system_message: SystemMessage) -> list[BaseMessage]:
         """Get the history with your system message."""
@@ -318,7 +319,9 @@ class History:
         logger.info("History trimmed %s/%s", len(self.messages), length_threshold)
         return summary
 
-    async def summarize_history(self, messages: list[BaseMessage] | None = None) -> AIMessage | None:
+    async def summarize_history(
+        self, messages: list[BaseMessage] | None = None
+    ) -> AIMessage | None:
         """
         Summarizes history based on just history.
         Returns the summary message assuming no error occurred.
@@ -329,7 +332,13 @@ class History:
         # put the summary to the system prompt
         cfg = manager.get_config()
         system = SystemMessage(cfg.prompts.history_compression_system)
-        human = HumanMessage(cfg.prompts.history_compression_human)
+        last_summary = (
+            "\n\nHere's also the previous summary for additional context:\n"
+            + message_to_md(self.last_compression)
+            if self.last_compression and message_to_md(self.last_compression)
+            else ""
+        )
+        human = HumanMessage(cfg.prompts.history_compression_human + last_summary)
         model = cfg.get_model(cfg.llm.models.history_summary)
         llm = get_backend(model)
         logger.info("Summarizing history...")
@@ -344,6 +353,7 @@ class History:
                 logger.error("Creating summary failed: %s", e)
 
         if full is not None and content_exists(full.content):
+            self.last_compression = full
             return full
         else:
             logger.error("Error summarizing history. Nothing changed.")

@@ -98,6 +98,7 @@ class InputMessage(BaseModel):
     media: Optional[list[dict[str, str]]] = None
     difficulty: Optional[Difficulty] = None
     goal: Optional[str] = None
+    context: Optional[str] = None
 
 
 class InputCommand(BaseModel):

@@ -14,10 +14,11 @@ from langchain_core.messages import (
 from langchain_core.tools import tool
 from pydantic import ValidationError
 
-from core.agent import convert_difficulty, infer_difficulty
+from core.agent import AgentData, convert_difficulty, infer_difficulty
 from core.backends import LLMBackend, get_backend
 from core.config import manager, state
 from core.context import get_context
+from core.core_data import LocalData
 from core.history import History
 from core.registry import LLMTool, get_tools
 from core.socket_system import socket_out
@@ -45,6 +46,7 @@ class Vector:
         self.message_queue: asyncio.Queue[InputMessage] = asyncio.Queue()
         self.history = History()
         self.batch: list[InputMessage] = []
+        self.data: LocalData = LocalData()
         self.abort: Signal = Signal()
         self.abort.connect(self._on_abort)
 
@@ -166,7 +168,9 @@ class Vector:
         """
         self.history.load()
         self.history.validate_history()
-        await self.history.trim_history()
+        compressed = await self.history.trim_history()
+        if compressed:
+            self.data.last_compression = compressed
 
         config = manager.get_config()
 
@@ -181,34 +185,18 @@ class Vector:
         if message.media:
             content.extend(convert_to_langchain_media(message.media))
 
-        difficulty: Optional[Difficulty] = None
         if message.difficulty is not None:
             if message.difficulty == Difficulty.INFER:
                 inferred_difficulty = infer_difficulty(text)
-                difficulty = convert_difficulty(inferred_difficulty)
+                self.data.agent.difficulty = convert_difficulty(inferred_difficulty)
             else:
-                difficulty = message.difficulty
+                self.data.agent.difficulty = message.difficulty
         else:
-            difficulty = config.agent.default_difficulty_fallback
+            self.data.agent.difficulty = config.agent.default_difficulty_fallback
 
-        agent_data_path = Path(config.agent.data_path).expanduser().resolve()
-        agent_data_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            data = json.loads(agent_data_path.read_text())
-        except FileNotFoundError:
-            data = {}
-        data["difficulty"] = difficulty
-        data["completed"] = False
-        # Mark optional goal
-        # Maybe infer mode later?
-        # I don't know if it would make sense though.
-        # Probably not
-        # Also make this always be set so that the model
-        # doesn't accidentally start doing something weird
-        # from a past goal.
-        data["goal"] = message.goal
-        agent_data_path.write_text(json.dumps(data))
-        agent_mode = is_autonomous(difficulty)
+        self.data.agent.completed = False
+        self.data.agent.goal = message.goal
+        self.data.agent.context = message.context
 
         self.history.append(HumanMessage(content))
         logger.info("USER: %s", text)
@@ -219,9 +207,8 @@ class Vector:
         while True:
             config = manager.get_config()
             max_iterations = config.stream.max_iterations
-            bypass_iterations = config.agent.ignore_iterations and agent_mode
             # Reload every turn
-            if difficulty == Difficulty.SIMPLE:
+            if self.data.agent.difficulty == Difficulty.SIMPLE:
                 # No tools for simple requests
                 logger.info("Simple mode selected. No tools are given for the LLM.")
                 tools = {}
@@ -298,14 +285,13 @@ class Vector:
             self.history.append(full_response)
             # Save and validate here because of the validation system
             self.history.save()
-            await self.history.trim_history()
-            if config.history.message_compression:
-                await self.history.compress_messages(
-                    config.history.message_compression_message_min_length,
-                    config.history.message_compression_message_min_char,
-                )
+            compressed = await self.history.trim_history()
+            if compressed is not None:
+                # this has the issue of the compression context not getting to the model
+                # on the next compression
+                self.data.last_compression = compressed
 
-            if i >= max_iterations and not bypass_iterations:
+            if i >= max_iterations:
                 logger.warning("Exeeded max LLM iterations (%s)", max_iterations)
                 break
 
@@ -313,10 +299,8 @@ class Vector:
                 self.history.extend(
                     await self._handle_tool_calls(tools, full_response.tool_calls)
                 )
-            elif agent_mode:
-                data: dict[str, Any] = json.loads(agent_data_path.read_text())
-                completed: bool = data.get("completed", False)
-                if completed:
+            elif is_autonomous(self.data.agent.difficulty):
+                if self.data.agent.completed:
                     break
                 else:
                     logger.error("LLM nudge triggered.")
@@ -335,7 +319,7 @@ class Vector:
         cfg = manager.get_config()
         model = cfg.get_model(cfg.llm.models.main)
         self.llm = get_backend(model)
-        context = await get_context()
+        context = await get_context(self.data)
         logger.info(
             "Running with system prompt with a length of %s", len(context.content)
         )

@@ -169,5 +169,5 @@ class LocalData(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     global_data: Data = data
-    agent_data: AgentData = Field(default_factory=AgentData)
+    agent: AgentData = Field(default_factory=AgentData)
     last_compression: AIMessage = Field(default_factory=lambda: AIMessage(""))

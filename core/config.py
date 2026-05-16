@@ -163,8 +163,6 @@ class AgentConfig(BaseModel):
     infer_default_fallback: Literal[1, 2, 3] = 2
     default_difficulty_fallback: Difficulty = Difficulty.AUTONOMOUS_TRAJECTORY
 
-    ignore_iterations: bool = False
-    data_path: str = "~/.null-shift/brain/agent.json"
     continue_prompt: str = "[AGENT SYSTEM]: You haven't indicated completion intent. Continue the task or call the agent_complete_objective tool. Remeber to stay in the tool call loop by calling tools every response!"
 
 
