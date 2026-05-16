@@ -4,6 +4,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+from langchain_core.messages import AIMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -169,3 +170,4 @@ class LocalData(BaseModel):
 
     global_data: Data = data
     agent_data: AgentData = Field(default_factory=AgentData)
+    last_compression: AIMessage = Field(default_factory=lambda: AIMessage(""))

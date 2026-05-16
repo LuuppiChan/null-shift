@@ -3,6 +3,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Iterable, cast
+from typing_extensions import deprecated
 
 from langchain_core.messages import (
     AIMessage,
@@ -185,9 +186,10 @@ class History:
         if validated and not isinstance(validated[-1], (AIMessage, AIMessageChunk)):
             logger.info("Keeping history. Appending an AIMessage to close the turn.")
             recovery_prompt = (
-                "[System Notification: The previous workflow was abruptly interrupted. "
-                "Any pending actions were aborted. "
-                "Please seamlessly process the user's newest request without apologizing for the interruption.]"
+                "Stream aborted as requested."
+                # "[System Notification: The previous workflow was abruptly interrupted. "
+                # "Any pending actions were aborted. "
+                # "Please seamlessly process the user's newest request without apologizing for the interruption.]"
             )
             validated.append(AIMessage(content=recovery_prompt))
 
@@ -200,10 +202,11 @@ class History:
 
         self.messages = validated
 
-    async def trim_history(self, length: int | None = None):
+    async def trim_history(self, length: int | None = None) -> AIMessage | None:
         """
         Trims the history by removing old messages based on either the config or an input argument.
         First message will either be a ToolMessage or HumanMessage.
+        Returns A summary message if any.
         """
         cfg = manager.get_config()
 
@@ -299,10 +302,13 @@ class History:
             )
             return
 
+        summary = None
         if cfg.history.compression:
             try:
-                summary = await summarize_history(popped_messages, self.messages[0])
-                self.messages = summary + self.messages
+                # it's intended to summarize the full history.
+                # the popped_messages might be useful for something later.
+                summary = await self.summarize_history()
+                # self.messages = summary + self.messages
             except Exception as e:
                 logger.warning("Didn't compress the history: %s", e)
                 # Because I don't want to lose my history on an error.
@@ -310,56 +316,47 @@ class History:
 
         # Move this here because it's more logical to be here instead of before pop messages return
         logger.info("History trimmed %s/%s", len(self.messages), length_threshold)
+        return summary
 
-    async def compress_messages(self, min_length: int = 5, min_char_limit: int = 5000):
+    async def summarize_history(self, messages: list[BaseMessage] | None = None) -> AIMessage | None:
         """
-        Compresses absurdly large messages in the history to summaries.
-
-        Args:
-            min_length: How many last messages to preserve as original.
+        Summarizes history based on just history.
+        Returns the summary message assuming no error occurred.
         """
-        # gives all except n last messages
-        # it doesn't give any if here is less than n
-        # >>> [1,2,3,4][:-5]
-        # []
-        compressable = self.messages[:-min_length]
+        if messages is None:
+            messages = self.messages
 
-        if not compressable:
-            logger.info("No long message compression, history is too short.")
-            return
+        # put the summary to the system prompt
+        cfg = manager.get_config()
+        system = SystemMessage(cfg.prompts.history_compression_system)
+        human = HumanMessage(cfg.prompts.history_compression_human)
+        model = cfg.get_model(cfg.llm.models.history_summary)
+        llm = get_backend(model)
+        logger.info("Summarizing history...")
 
-        # The i is the same index as in the real messages list.
-        for i, msg in enumerate(compressable):
-            if isinstance(msg.content, str) and len(msg.content) > min_char_limit:
-                compressed = await compress_message(msg)
-                logger.debug("Message %s compressed", i)
-            elif isinstance(msg.content, list) and msg.content:
-                for block in msg.content:
-                    if isinstance(block, str) and len(block) > min_char_limit:
-                        compressed = await compress_message(msg)
-                        logger.debug("Message %s compressed", i)
-                        break
-                    elif isinstance(block, dict):
-                        text = block.get("text")
-                        if text and len(text) > min_char_limit:
-                            compressed = await compress_message(msg)
-                            logger.debug("Message %s compressed", i)
-                            break
-                else:
-                    compressed = msg
-            else:
-                compressed = msg
-            self.messages[i] = compressed
-        logger.info("History compression completed.")
+        full = None
+        for _ in range(3):
+            try:
+                async for chunk in llm.stream([system] + messages + [human], None):
+                    full = chunk if full is None else cast(AIMessage, full + chunk)
+                break
+            except Exception as e:
+                logger.error("Creating summary failed: %s", e)
+
+        if full is not None and content_exists(full.content):
+            return full
+        else:
+            logger.error("Error summarizing history. Nothing changed.")
 
 
+@deprecated("Use History.summarize_history instead")
 async def summarize_history(
     messages: list[BaseMessage], message_after_summary: BaseMessage
 ) -> list[BaseMessage]:
     """Returns the some messages with the summary ready to be appended to the messages."""
     cfg = manager.get_config()
     md = messages_to_md(messages)
-    system = cfg.prompts.history_compression
+    system = cfg.prompts.history_compression_system
     human = HumanMessage(md)
     msgs = [SystemMessage(system), human]
     model = cfg.get_model(cfg.llm.models.history_summary)
@@ -376,6 +373,21 @@ async def summarize_history(
 
     if full and content_exists(full.content):
         summary = HumanMessage(full.content)
+
+        content = full.content
+        if isinstance(content, list):
+            for block in reversed(content):
+                if isinstance(block, dict) and block.get("type") == "thinking":
+                    del block
+
+            content = [
+                block
+                for block in content
+                if not (isinstance(block, dict) and block.get("type") == "thinking")
+            ]
+
+        summary.content = content
+
         if messages and isinstance(message_after_summary, (AIMessage, AIMessageChunk)):
             return [summary]
         else:
@@ -386,10 +398,11 @@ async def summarize_history(
         raise Exception("Summary exception")
 
 
+@deprecated("slow")
 async def compress_message(msg: BaseMessage) -> BaseMessage:
     """Compress a single message."""
     cfg = manager.get_config()
-    system = SystemMessage(cfg.prompts.message_compression)
+    system = SystemMessage(cfg.prompts.history_compression_system)
     human = HumanMessage(message_to_md(msg))
     msgs = [system, human]
     model = cfg.get_model(cfg.llm.models.message_summary)
@@ -405,8 +418,20 @@ async def compress_message(msg: BaseMessage) -> BaseMessage:
             logger.error("Creating summary failed: %s", e)
 
     if full and content_exists(full.content):
+        content = full.content
+        if isinstance(content, list):
+            for block in reversed(content):
+                if isinstance(block, dict) and block.get("type") == "thinking":
+                    del block
+
+            content = [
+                block
+                for block in content
+                if not (isinstance(block, dict) and block.get("type") == "thinking")
+            ]
+
         summarized = copy.deepcopy(msg)
-        summarized.content = full.content
+        summarized.content = content
         return summarized
     else:
         logger.error("Failed to summarize message, returning original.")
