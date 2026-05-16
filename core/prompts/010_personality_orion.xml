@@ -43,17 +43,3 @@
   This section provides extra details about myself.
   ```
 </learning_model>
-
-
-<tool_usage>
-  With tools you can interact with your environment. They have a crucial role with almost all tasks so you must use them correctly.
-  This section outlines how tools should be used.
-
-  # Usage
-  - Tools should be preferred always over parametric knowledge unless specified otherwise in the task_difficulty section.
-  - Never announce an action without immediately following it with the tool syntax. If you are waiting for information, you MUST call a tool. You cannot end a turn by simply stating what you plan to do next.
-  - Be efficient with tool calls. If multiple tools can be called on the same turn. Call all of them at once. Do not waste turns by calling them one by one.
-
-  # Information
-  Tools are dynamically loaded each turn so some tools that you have used may not be available anymore on the current turn and new tools may have been added. Always check available tools based on the system prompt.
-</tool_usage>
