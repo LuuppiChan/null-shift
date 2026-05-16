@@ -35,6 +35,7 @@ from global_types import (
     convert_to_langchain_media,
     is_autonomous,
 )
+from output_message import OutputMessage
 
 logger = logging.getLogger(__name__)
 
@@ -336,19 +337,13 @@ class Vector:
                 if full_response is None
                 else cast(AIMessage, full_response + chunk)
             )
-            payload = {}
+            out_msg = OutputMessage()
 
             match content:
                 case str():
                     # It's a simple string (most common for text LLMs)
                     if content:
-                        payload["text"] = content
-                    else:
-                        # This key exists for some reason so this is to make sure it gets deleted for sure.
-                        try:
-                            del payload["text"]
-                        except KeyError:
-                            pass
+                        out_msg.text = content
                 case []:
                     # Ignore empty content blocks
                     pass
@@ -359,13 +354,13 @@ class Vector:
                     for part in content:
                         if isinstance(part, str):
                             if part:
-                                payload["text"] = part
+                                out_msg.text = part
                         else:
                             match part.get("type"):
                                 case "text":
-                                    payload["text"] = part.get("text", "")
+                                    out_msg.text = part.get("text")
                                 case "thinking":
-                                    payload["reasoning"] = part.get("thinking", "")
+                                    out_msg.reasoning = part.get("thinking")
                                 case None:
                                     logger.warning(
                                         "Type not found in answer dict part: %s", part
@@ -374,7 +369,6 @@ class Vector:
                                     logger.error(
                                         "Unhandled dict type: %s", part.get("type")
                                     )
-                                    payload[part.get("type")] = part
                 case list() if all(isinstance(item, str) for item in content):
                     # It's a list of strings
                     logger.warning(
@@ -385,26 +379,16 @@ class Vector:
                     logger.error("LLM message content not recognized: %r", content)
 
             reasoning = None
-            if hasattr(chunk, "reasoning_content") and chunk.reasoning_content:  # pyright: ignore[reportAttributeAccessIssue]
-                reasoning = chunk.reasoning_content  # pyright: ignore[reportAttributeAccessIssue]
-            elif chunk.additional_kwargs.get("reasoning_content"):
+            if chunk.additional_kwargs.get("reasoning_content"):
                 reasoning = chunk.additional_kwargs.get("reasoning_content")
 
-            if reasoning:
-                payload["reasoning"] = reasoning
-
-            if payload:
-                bus_message = BusMessage(topic=MessageTopic.STREAM, payload=payload)
-                await socket_out.send(bus_message)
+            out_msg.reasoning = reasoning
+            await socket_out.send(out_msg.to_bus(MessageTopic.STREAM))
 
         # send full response
-        payload = {}
-        if hasattr(full_response, "reasoning_content"):
-            payload["reasoning"] = full_response.reasoning_content  # pyright: ignore[reportAttributeAccessIssue, reportOptionalMemberAccess]
-        elif full_response is not None:
-            payload["reasoning"] = full_response.additional_kwargs.get(
-                "reasoning_content"
-            )
+        out_msg = OutputMessage()
+        if full_response is not None:
+            out_msg.reasoning = full_response.additional_kwargs.get("reasoning_content")
 
         if full_response and isinstance(full_response.content, list):
             text_parts = []
@@ -420,17 +404,14 @@ class Vector:
                         reasoning_parts.append(part.get("thinking", ""))
 
             if reasoning_parts:
-                existing_reasoning = payload.get("reasoning") or ""
-                payload["reasoning"] = existing_reasoning + "".join(reasoning_parts)
+                existing_reasoning = out_msg.reasoning or ""
+                out_msg.reasoning = existing_reasoning + "".join(reasoning_parts)
 
-            payload["text"] = "".join(text_parts) if text_parts else None
+            out_msg.text = "".join(text_parts) if text_parts else None
         else:
-            payload["text"] = str(full_response.content if full_response else None)
+            out_msg.text = str(full_response.content if full_response else None)
 
-        payload = {k: v for k, v in payload.items() if v}
-
-        bus_message = BusMessage(topic=MessageTopic.FULL, payload=payload)
-        await socket_out.send(bus_message)
+        await socket_out.send(out_msg.to_bus(MessageTopic.FULL))
         return full_response
 
     async def _handle_tool_calls(
@@ -439,14 +420,11 @@ class Vector:
         logger.info("LLM requested %s tool(s)", len(tool_calls))
         for tool_call in tool_calls:
             await socket_out.send(
-                BusMessage(
-                    topic=MessageTopic.TOOL_CALL,
-                    payload={
-                        "tool_call_id": tool_call["id"],
-                        "tool_name": tool_call["name"],
-                        "args": tool_call["args"],
-                    },
-                )
+                OutputMessage(
+                    tool_call_id=tool_call["id"],
+                    tool_name=tool_call["name"],
+                    tool_args=tool_call["args"],
+                ).to_bus(MessageTopic.TOOL_CALL)
             )
 
         tasks = []
@@ -472,14 +450,11 @@ class Vector:
 
         for result in results:
             await socket_out.send(
-                BusMessage(
-                    topic=MessageTopic.TOOL_RESULT,
-                    payload={
-                        "content": result.content,
-                        "tool_call_id": result.tool_call_id,
-                        "tool_name": result.name,
-                    },
-                )
+                OutputMessage(
+                    tool_result=result.content,
+                    tool_call_id=result.tool_call_id,
+                    tool_name=result.tool_name,
+                ).to_bus(MessageTopic.TOOL_RESULT)
             )
 
         return results
