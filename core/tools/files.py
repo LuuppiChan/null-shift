@@ -86,6 +86,10 @@ def _validate_and_resolve_path(
         # artifact path must be resolved at some point
         return str(Path(resolved_path).expanduser().resolve()), None
 
+    # should be absolute at this point
+    if not Path(file_path).is_absolute():
+        return "", "Error: Given path wasn't absolute or artifact name."
+
     if not _is_allowed(file_path):
         action_str = "read" if action == "read" else "edited or written to"
         return "", f"Error: File {file_path} is blacklisted and cannot be {action_str}."

@@ -2,17 +2,17 @@
 Collects memory, task list and plan.
 """
 
-import json
 import logging
 from pathlib import Path
 
-from core.config import manager, tool_manager
+from core.config import tool_manager
+from core.core_data import LocalData
 from core.helpers import PromptHelper
 
 logger = logging.getLogger(__name__)
 
 
-def collect() -> str | None:
+def collect(data: LocalData | None = None) -> str | None:
     cfg = tool_manager.get_config()
     parts: list[str] = []
     memory = PromptHelper("memory", "Your MEMORY.md file")
@@ -45,13 +45,14 @@ def collect() -> str | None:
     else:
         logger.warning("No task.md file found.")
 
-    file = Path(manager.get_config().agent.data_path).expanduser().resolve()
-    if file.exists():
-        text = file.read_text()
-        data: dict = json.loads(text)
-        goal = data.get("goal")
+    if data:
+        goal = data.agent.goal
         if goal:
             task_at_hand.add_part(goal, "current_goal", "Goal of the current task.")
+
+        context = data.agent.context
+        if context:
+            task_at_hand.add_part(context, "goal_context", "Additional context for completing the goal.")
 
     if task_at_hand:
         parts.append(task_at_hand.compile())
