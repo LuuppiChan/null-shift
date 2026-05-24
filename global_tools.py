@@ -11,7 +11,7 @@ from typing import Any, Awaitable, Callable
 import tomllib
 from pydantic import BaseModel, ValidationError
 
-type Connection = Callable | Callable[..., Awaitable]
+type Connection[T, U] = Callable | Callable[[T | U], Awaitable]
 
 
 logger = logging.getLogger(__name__)
@@ -81,7 +81,7 @@ class Signal[T, U]:
     def __init__(self, *args: type[T], **kwargs: type[U]) -> None:
         self.args = args
         self.kwargs = kwargs
-        self.connections: list[Connection] = []
+        self.connections: list[Connection[T, U]] = []
 
     def connect(self, callable: Connection):
         """Connect a function."""

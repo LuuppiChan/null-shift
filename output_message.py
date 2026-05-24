@@ -1,7 +1,7 @@
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from global_types import BusMessage, MessageTopic
 
@@ -17,7 +17,7 @@ class OutputMessage(BaseModel):
     reasoning: str | None = None
     tool_name: str | None = None
     tool_call_id: str | None = None
-    tool_result: str | dict[str, Any] | None = None
+    tool_result: str | dict[str, Any] | list[dict[str, Any]] | list[str] | None = None
     tool_args: dict[str, Any] | None = None
     stream_id: str | Literal["default"] = "default"
     event: Event | str | None = None
@@ -29,5 +29,8 @@ class OutputMessage(BaseModel):
         )
 
     @staticmethod
-    def from_bus(message: BusMessage) -> "OutputMessage":
-        return OutputMessage.model_validate(message.payload)
+    def from_bus(message: BusMessage) -> Optional["OutputMessage"]:
+        try:
+            return OutputMessage.model_validate(message.payload)
+        except ValidationError:
+            return None

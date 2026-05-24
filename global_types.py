@@ -100,6 +100,14 @@ class InputMessage(BaseModel):
     goal: Optional[str] = None
     context: Optional[str] = None
 
+    def to_bus(self, topic: MessageTopic = MessageTopic.INPUT) -> BusMessage:
+        return BusMessage(
+            topic=topic,
+            payload=self.model_dump(
+                exclude_defaults=True, exclude_unset=True, exclude_none=True
+            ),
+        )
+
 
 class InputCommand(BaseModel):
     """Typed command message"""

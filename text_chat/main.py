@@ -79,7 +79,7 @@ class TextChat:
                 case MessageTopic.TOOL_RESULT:
                     tool_name = message.payload.get("tool_name", "No name")
                     print(colored(f"TOOL: [{tool_name}] returned", "dark_grey"))
-                    content = message.payload.get("content", "")
+                    content = message.payload.get("tool_result", "")
                     if content:
                         print(colored(content, "yellow"))
                 case MessageTopic.FINISHED:
