@@ -1,54 +1,23 @@
+import collections
 import os
 import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, BaseMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 
 from core.agent import AgentData
 from core.config import tool_manager
-from core.socket_system import socket_out
-from global_types import BusMessage, MessageTopic
 
 
 class Data:
     """
     Contains data from the system useful for prompts and tools.
     """
-
-    def __init__(self) -> None:
-        socket_out.sent.connect(self.listener)
-        self.history: list[Message] = []
-
-    def listener(self, msg: BusMessage):
-        match msg.topic:
-            case MessageTopic.INPUT:
-                self.history.append(
-                    Message(
-                        msg.payload.get("title", msg.payload.get("body", "")), "user"
-                    )
-                )
-            case MessageTopic.FULL:
-                self.history.append(Message(msg.payload.get("text", ""), "assistant"))
-            case MessageTopic.TOOL_CALL:
-                self.history.append(
-                    Message(
-                        msg.payload.get("tool_name", "")
-                        + " "
-                        + msg.payload.get("tool_call_id", ""),
-                        "tool_call",
-                    )
-                )
-            case MessageTopic.TOOL_RESULT:
-                self.history.append(
-                    Message(
-                        (msg.payload.get("tool_call_id", "")),
-                        "tool_result",
-                    )
-                )
 
     @staticmethod
     def datetime() -> str:
@@ -125,15 +94,6 @@ class Data:
             text=True,
         ).stdout
 
-    def recent_events(self, count: int) -> str:
-        return "\n".join(
-            [
-                f"{msg.timestamp.strftime('[%H:%M:%S %d/%m/%Y]')} {msg.type}: {msg.text}"
-                for msg in data.history[-count:]
-                # if count is higher than history len, it will just give full list
-            ]
-        )
-
     @staticmethod
     def volume() -> str:
         return subprocess.run(
@@ -151,13 +111,6 @@ class Data:
         )
 
 
-class Message:
-    def __init__(self, text: str, msg_type: str = "") -> None:
-        self.timestamp = datetime.now()
-        self.text = text
-        self.type = msg_type
-
-
 data = Data()
 
 
@@ -165,9 +118,19 @@ class LocalData(BaseModel):
     """
     Contains data about the current stream and a reference to the global data.
     """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    history: collections.deque[BaseMessage] = Field(
+        default_factory=lambda: collections.deque(maxlen=1000)
+    )
+
     # just in case global data is arbitrary
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     global_data: Data = data
     agent: AgentData = Field(default_factory=AgentData)
     last_compression: AIMessage = Field(default_factory=lambda: AIMessage(""))
+
+    def _add_history(self, message: BaseMessage):
+        self.history.append(message)

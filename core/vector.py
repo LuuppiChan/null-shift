@@ -42,12 +42,16 @@ logger = logging.getLogger(__name__)
 
 class Vector:
     def __init__(self, input_queue: asyncio.Queue[BusMessage]) -> None:
+        global vector
+        vector = self
+
         self.llm: LLMBackend
         self.input_queue: asyncio.Queue[BusMessage] = input_queue
         self.message_queue: asyncio.Queue[InputMessage] = asyncio.Queue()
         self.history = History()
         self.batch: list[InputMessage] = []
         self.data: LocalData = LocalData()
+        self.history.added.connect(self.data._add_history)
         self.abort: Signal = Signal()
         self.abort.connect(self._on_abort)
 
@@ -378,11 +382,11 @@ class Vector:
                 case _:
                     logger.error("LLM message content not recognized: %r", content)
 
-            reasoning = None
-            if chunk.additional_kwargs.get("reasoning_content"):
-                reasoning = chunk.additional_kwargs.get("reasoning_content")
+            if out_msg.reasoning is None:
+                reasoning_content = chunk.additional_kwargs.get("reasoning_content")
+                if reasoning_content:
+                    out_msg.reasoning = reasoning_content
 
-            out_msg.reasoning = reasoning
             await socket_out.send(out_msg.to_bus(MessageTopic.STREAM))
 
         # send full response
@@ -453,7 +457,7 @@ class Vector:
                 OutputMessage(
                     tool_result=result.content,
                     tool_call_id=result.tool_call_id,
-                    tool_name=result.tool_name,
+                    tool_name=result.name,
                 ).to_bus(MessageTopic.TOOL_RESULT)
             )
 

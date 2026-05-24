@@ -28,6 +28,7 @@ class VertexAIBackend(LLMBackend):
             "max_tokens": model.max_tokens,
             "top_p": model.top_p,
             "vertexai": True,
+            **(cfg.model_extra or {})
         }
 
         self.config = {k: v for k, v in self.config.items() if v is not None}

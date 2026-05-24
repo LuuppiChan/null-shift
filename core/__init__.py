@@ -16,4 +16,3 @@ def run() -> NoReturn:
         pass
     finally:
         core.main.ctx.term()
-        exit()

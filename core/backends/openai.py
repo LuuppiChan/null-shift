@@ -19,8 +19,13 @@ def _patched_convert_delta(
     _dict: Mapping[str, Any], default_class: type[BaseMessageChunk]
 ) -> BaseMessageChunk:
     chunk = _original_convert(_dict, default_class)
-    if default_class.__name__ == "AIMessageChunk" and _dict.get("reasoning_content"):
-        chunk.additional_kwargs["reasoning_content"] = _dict["reasoning_content"]
+    if default_class.__name__ == "AIMessageChunk":
+        # openai
+        if "reasoning_content" in _dict:
+            chunk.additional_kwargs["reasoning_content"] = _dict["reasoning_content"]
+        # openrouter
+        elif "reasoning" in _dict:
+            chunk.additional_kwargs["reasoning_content"] = _dict["reasoning"]
     return chunk
 
 
@@ -40,6 +45,8 @@ class OpenAIBackend(LLMBackend):
             presence_penalty=model.presence_penalty,
             frequency_penalty=model.frequency_penalty,
             reasoning_effort=model.reasoning_effort if model.reasoning_effort else None,
+            reasoning=model.reasoning,
+            extra_body=model.extra_body if model.extra_body else None,
         )
 
     def stream(

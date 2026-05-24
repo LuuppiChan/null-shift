@@ -3,7 +3,6 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Iterable, cast
-from typing_extensions import deprecated
 
 from langchain_core.messages import (
     AIMessage,
@@ -16,6 +15,7 @@ from langchain_core.messages import (
     messages_from_dict,
     messages_to_dict,
 )
+from typing_extensions import deprecated
 
 from core.backends import get_backend
 from core.config import manager
@@ -30,7 +30,9 @@ class History:
         self.added = Signal(BaseMessage)
         self.last_compression: AIMessage | None = None
 
-    def with_system_message(self, system_message: SystemMessage) -> list[BaseMessage]:
+    def with_system_message(
+        self, system_message: SystemMessage, compression: bool = False
+    ) -> list[BaseMessage]:
         """Get the history with your system message."""
         # Shallow list in python, cheap
         return [system_message] + self.messages

@@ -98,7 +98,6 @@ async def main():
 
     input_queue: asyncio.Queue[BusMessage] = asyncio.Queue()
     vector = core.vector.Vector(input_queue)
-    core.vector.vector = vector
 
     logger.info("Starting listener")
     listen_task = asyncio.create_task(listener_loop(input_queue), name="listen")

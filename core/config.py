@@ -98,13 +98,15 @@ class ModelInfo(BaseModel):
     provider: Literal["openai", "vertexai", "litellm"] | str | None = None
     url: str | None = None
     api_key: str | None = None
-    name: str | int = ""
+    name: str = ""
     reasoning_effort: str | None = None
+    reasoning: dict[str, Any] | None = None
     temperature: Optional[float] = Field(default=None, ge=0)
     top_p: Optional[float] = Field(default=None, ge=0, le=1)
     presence_penalty: Optional[float] = Field(default=None, ge=-2, le=2)
     frequency_penalty: Optional[float] = Field(default=None, ge=-2, le=2)
     max_tokens: Optional[int] = None
+    extra_body: Optional[dict[str, Any]] = None
 
     def with_overrides(self, other: "ModelInfo") -> "ModelInfo":
         return self.model_copy(
@@ -186,6 +188,7 @@ class HistoryConfig(BaseModel):
     compression: bool = True
     compression_threshold: int = 30
     compression_target_length: int = 15
+    aggressive_compression: bool = False
 
 
 class SocketConfig(BaseModel):
@@ -256,8 +259,12 @@ class CoreConfig(BaseModel):
     def get_model(self, identifier: ModelIdentifier) -> ModelInfo:
         """Get model based on identifier."""
         if isinstance(identifier, ModelInfo):
+            if identifier.name in self.llm.model_tiers:
+                return self.llm.default.with_overrides(self.llm.model_tiers[identifier.name])
             return self.llm.default.with_overrides(identifier)
         elif identifier is None:
+            if model := self.llm.model_tiers.get(self.llm.default.name):
+                self.llm.default = model
             return self.llm.default
         elif model := self.llm.model_tiers.get(identifier):
             return model
