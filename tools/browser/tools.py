@@ -129,10 +129,24 @@ async def get_agent_dom(page: Page):
                         let iframeRes = processNode(iframeBody, passInteractiveState, currentRole, passIsInsideRichText);
                         if (iframeRes) childrenText.push(iframeRes);
                     } else {
-                        childrenText.push(" [IFRAME: Cross-Origin Restricted] ");
+                        let frameSrc = node.src || node.getAttribute('src') || '';
+                        if (frameSrc.includes('google.com/recaptcha')) {
+                            let captchaId = idCounter++;
+                            node.setAttribute('data-agent-id', captchaId);
+                            childrenText.push(` [${captchaId}] BUTTON (reCAPTCHA checkbox) `);
+                        } else {
+                            childrenText.push(" [IFRAME: Cross-Origin Restricted] ");
+                        }
                     }
                 } catch (e) {
-                    childrenText.push(" [IFRAME: Cross-Origin Restricted] ");
+                    let frameSrc = node.src || node.getAttribute('src') || '';
+                    if (frameSrc.includes('google.com/recaptcha')) {
+                        let captchaId = idCounter++;
+                        node.setAttribute('data-agent-id', captchaId);
+                        childrenText.push(` [${captchaId}] BUTTON (reCAPTCHA checkbox) `);
+                    } else {
+                        childrenText.push(" [IFRAME: Cross-Origin Restricted] ");
+                    }
                 }
             } else {
                 for (let child of node.childNodes) {
