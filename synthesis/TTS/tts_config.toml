@@ -1,9 +1,39 @@
 zmq_output_bind = "tcp://localhost:5556"
 
+# Active TTS provider selection: "piper" or "chattts"
+provider = "chattts"
+
+# Configuration for ChatTTS provider
+[chattts]
+# compile: Whether to use torch.compile to optimize the models (takes significantly longer to load, false is recommended)
+compile = true
+
+# device: Hardware device to run the models on (e.g. "cuda", "cpu", or leave commented out/null to auto-detect)
+device = "cuda"
+
+# speaker_seed: Seed to generate a consistent and reproducible speaker voice
+speaker_seed = 2
+
+# speaker_string: Optional pre-generated speaker representation string (overrides speaker_seed if specified)
+# speaker_string = ""
+
+# temperature: Controls randomness/variability of the voice. Higher is more expressive/variable, lower is more stable.
+temperature = 0.3
+
+# top_K: Controls token diversity in sampling (higher values allow more variety)
+top_K = 10
+
+# top_P: Nucleus sampling probability cutoff (higher values allow more variety)
+top_P = 0.7
+
+# refine_text: Automatically refine and clean the input text, introducing conversational pauses/dynamics
+refine_text = true
+
 default_tts_lang = "en"
 voice_rate = 1.0
 voice_volume = 1.0
 tts_language_detection_min_chars = 5
+
 
 [piper_models.en]
 model = "/home/luuppi/Documents/coding/python_projects/assistant/models/piper/en_GB-alan-low.onnx"
@@ -62,6 +92,9 @@ replacement = ""
 "#" = ""
 "`" = ""
 "~" = ""
+"!" = "."
+"?" = "."
+"[empty_response]" = ""
 "ASMR" = "A S M R"
 "[TOOL_CALL_TRIGGERED]" = ""
 "[TOOL_CALL_FINISHED]" = ""

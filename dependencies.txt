@@ -14,7 +14,9 @@ thefuzz
 PyAudio
 langdetect
 piper-tts
+ChatTTS
 pathvalidate
+flet
 
 # tools
 pypdf

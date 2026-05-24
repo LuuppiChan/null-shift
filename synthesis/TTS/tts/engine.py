@@ -1,12 +1,18 @@
 from typing import Any, Iterator
-from tts.piper_provider import PiperTTSProvider
+from config import config
 
 class TTSEngine:
     """
     Facade for the Text-to-Speech system.
     """
-    def __init__(self):
-        self.provider = PiperTTSProvider()
+    def __init__(self) -> None:
+        if config.provider == "chattts":
+            from tts.chattts_provider import ChatTTSProvider
+            self.provider = ChatTTSProvider()
+        else:
+            from tts.piper_provider import PiperTTSProvider
+            self.provider = PiperTTSProvider()
+
 
     def speak(self, text: str, wait: bool = True, stop_existing: bool = True) -> None:
         """Synthesizes and plays a single string of text."""

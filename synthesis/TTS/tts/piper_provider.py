@@ -2,7 +2,7 @@ import os
 import subprocess
 import threading
 import logging
-from typing import Any, Iterator, Optional
+from typing import Iterator
 import langdetect
 
 from config import config
