@@ -47,6 +47,8 @@ def main():
             import text_chat
         case "tools":
             launch_tools()
+        case "gui":
+            import gui
         case _:
             print(f"Unknown module: {args.module}")
 
