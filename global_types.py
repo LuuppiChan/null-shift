@@ -155,10 +155,14 @@ class CachedFile:
         if not self.file.exists():
             return None
 
-        if self.needs_refresh():
-            self.cache = self.file.read_text()
-            new_mtime = self.file.stat().st_mtime
-            self.mtime = new_mtime
+        try:
+            if self.needs_refresh():
+                self.cache = self.file.read_text()
+                new_mtime = self.file.stat().st_mtime
+                self.mtime = new_mtime
+        except Exception as e:
+            logger.error("Could not get file contents from file %s: %s", self.file, e)
+            return None
 
         return self.cache
 
@@ -241,7 +245,12 @@ async def run_batch_ordered[T](
             if e is None:
                 result = task.result()
             else:
-                logger.warning("Task %s returned an exception: %s", task.get_name(), e)
+                logger.warning(
+                    "Task %s returned an exception: %s",
+                    task.get_name(),
+                    e,
+                    exc_info=True,
+                )
                 result = None
             results.append(result)
         except (
