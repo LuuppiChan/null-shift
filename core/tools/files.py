@@ -72,6 +72,17 @@ def _bypass_prompt(file_path: str | Path) -> bool:
     return False
 
 
+def _build_media_range_desc(start: Optional[float], end: Optional[float]) -> str:
+    """Build a human-readable time range description for media segments."""
+    if start is not None and end is not None:
+        return f"{start}s to {end}s"
+    if start is not None:
+        return f"{start}s onwards"
+    if end is not None:
+        return f"up to {end}s"
+    return ""
+
+
 def _validate_and_resolve_path(
     file_path: str | Artifacts, action: Literal["read", "edit"]
 ) -> tuple[str, Optional[str]]:
@@ -113,13 +124,14 @@ def file_read(
     file_path: str | Artifacts,
     start_line: Optional[int | float] = None,
     end_line: Optional[int | float] = None,
+    character_limit: int | None = None,
 ) -> str | list[str | dict[str, str]]:
     """
     Primary file reading tool.
     Reads files with line-range support.
     Handles both text and binary files, with automatic encoding detection.
     Respects permission boundaries.
-    Start and end lines are seconds when reading videos.
+    Start and end lines are seconds when reading videos or audio.
 
     Supported file types includes, but is not limited to
     - text
@@ -128,15 +140,26 @@ def file_read(
     - pdf
     - audio
 
+    start and end lines are supported on
+    - text
+    - video
+    - pdf (if pdf returns only text)
+    - audio
+
     Args:
         file_path: Absolute path to the file or an artifact name.
         start_line: Optional line to start the read at. Starts at the first line if not specified. (1-indexed)
         end_line: Optional line to end the read at. Reads to the end if not specified. (exclusive)
+        character_limit: Max character limit. None means default max character limit.
     """
     resolved_path, err = _validate_and_resolve_path(file_path, "read")
     if err:
         return err
     file_path = resolved_path
+
+    # Preserve raw time values for media before converting to 0-indexed for text.
+    media_start = start_line
+    media_end = end_line
 
     if start_line is None:
         start_line = 0
@@ -147,6 +170,10 @@ def file_read(
     path = Path(file_path)
     mime = magic.from_file(path, mime=True)
 
+    if character_limit is None:
+        cfg = tool_manager.get_config()
+        character_limit = cfg.file_absurd_size_limit
+
     if mime.startswith("image/"):
         content_list.append(
             {
@@ -155,10 +182,14 @@ def file_read(
             }
         )
     elif mime.startswith("video/"):
-        video = compress_video(path)
+        video = compress_video(path, start=media_start, end=media_end)
         if video is None:
             content_list.append(
-                {"text": _enforce_character_limit("Failed to read video.")}
+                {
+                    "text": _enforce_character_limit(
+                        "Failed to read video.", character_limit
+                    )
+                }
             )
         else:
             content_list.append(
@@ -169,14 +200,26 @@ def file_read(
                     "mime_type": "video/mp4",
                 }
             )
-            content_list.append(
-                {"text": "The video has been attached to this message."}
-            )
+            if media_start is not None or media_end is not None:
+                desc = _build_media_range_desc(media_start, media_end)
+                content_list.append(
+                    {
+                        "text": f"The video segment ({desc}) has been attached to this message."
+                    }
+                )
+            else:
+                content_list.append(
+                    {"text": "The video has been attached to this message."}
+                )
     elif mime.startswith("audio/"):
-        audio = compress_audio(path)
+        audio = compress_audio(path, start=media_start, end=media_end)
         if audio is None:
             content_list.append(
-                {"text": _enforce_character_limit("Failed to read audio.")}
+                {
+                    "text": _enforce_character_limit(
+                        "Failed to read audio.", character_limit
+                    )
+                }
             )
         else:
             content_list.append(
@@ -187,9 +230,17 @@ def file_read(
                     "mime_type": "audio/aac",
                 }
             )
-            content_list.append(
-                {"text": "The audio has been attached to this message."}
-            )
+            if media_start is not None or media_end is not None:
+                desc = _build_media_range_desc(media_start, media_end)
+                content_list.append(
+                    {
+                        "text": f"The audio segment ({desc}) has been attached to this message."
+                    }
+                )
+            else:
+                content_list.append(
+                    {"text": "The audio has been attached to this message."}
+                )
     elif mime == "application/pdf":
         # Just send to the content is as base64 as-is
         # Vertex AI will probably handle it.
@@ -211,9 +262,22 @@ def file_read(
         else:
             loader = PyPDFLoader(file_path)
             docs = loader.load()
+            full_text = []
             for doc in docs:
-                doc.page_content = _enforce_character_limit(doc.page_content)
-                content_list.append(doc.to_json())
+                text = doc.page_content
+                full_text.append(text)
+
+            lines = "\n\n".join(full_text).splitlines()
+            start_line = round(start_line)
+            if end_line is None:
+                text = lines[start_line:]
+            else:
+                end_line = round(end_line)
+                text = lines[start_line:end_line]
+
+            content_list.append(
+                {"text": _enforce_character_limit("\n".join(text), character_limit)}
+            )
     else:
         # if mime.startswith("text/") or any([mime.startswith(t) for t in SAFE_APP_TYPES]):
         lines = path.read_text(errors="replace").splitlines()
@@ -223,7 +287,9 @@ def file_read(
         else:
             end_line = round(end_line)
             text = lines[start_line:end_line]
-        content_list.append({"text": _enforce_character_limit("\n".join(text))})
+        content_list.append(
+            {"text": _enforce_character_limit("\n".join(text), character_limit)}
+        )
 
     if len(content_list) == 1 and "text" in content_list[0]:
         return content_list[0]["text"]
@@ -367,9 +433,7 @@ def file_glob(pattern: str, file_path: str | Artifacts) -> str:
             run_killable(lambda: list(path_obj.glob(pattern)), timeout=timeout)
         )
         if files is None:
-            raise TimeoutError(
-                "Globbing took too long and timed out or there was an internal issue with the tool"
-            )
+            raise TimeoutError("Globbing took too long and timed out")
 
         for p in files:
             if not p.is_file():  # Only search files
@@ -416,9 +480,9 @@ def file_grep(
     timeout = cfg.file_query_timeout
 
     path_obj = Path(file_path)
-    if not path_obj.is_dir():
+    if not path_obj.is_file() and not path_obj.is_dir():
         return _enforce_character_limit(
-            f"Error: The provided path '{file_path}' is not a directory or does not exist."
+            f"Error: The provided path '{file_path}' is not a file and not a directory or does not exist."
         )
 
     # Determine glob pattern for file selection
@@ -428,12 +492,15 @@ def file_grep(
 
     found_matches = []
     try:
-        # Get all files matching the include pattern
-        all_files = asyncio.run(
-            run_killable(lambda: list(path_obj.glob(glob_pattern)), timeout=timeout)
-        )
-        if all_files is None:
-            raise TimeoutError("File globbing for grep took too long and timed out")
+        if path_obj.is_dir():
+            # Get all files matching the include pattern
+            all_files = asyncio.run(
+                run_killable(lambda: list(path_obj.glob(glob_pattern)), timeout=timeout)
+            )
+            if all_files is None:
+                raise TimeoutError("File globbing for grep took too long and timed out")
+        else:
+            all_files = [path_obj]
 
         # Filter out excluded files and non-allowed files
         files_to_search = []

@@ -78,9 +78,9 @@ def run_command_safe(
 
     Args:
         programs: list of program objects
-        program: One single program to run, under is a breakdown of the keys
-            program: the name of the program you want to run
-            args: list of arguments to the given program
+            program object: One single program to run, under is a breakdown of the keys
+                program: the name of the program you want to run
+                args: list of arguments to the given program
         timeout: Per-command timeout to mitigate hanging.
 
     Examples:

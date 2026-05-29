@@ -17,12 +17,15 @@ if not is_autonomous(vector.data.agent.difficulty):
 
 
 @tool
-def agent_complete_objective() -> str:
+def agent_complete_objective(remove_artifacts: bool = False) -> str:
     """
     Complete your current objective.
 
     If the system prompt tells that you are in agent mode (Autonomous Strict or Autonomous Trajectory) you must call this after completing the current objective.
     If the current mode is Simple or Tool Assisted you don't need to call this.
+
+    Args:
+        remove_artifacts: Delete task.md and plan.md
     """
     from core.vector import vector
     data = vector.data.agent
@@ -30,9 +33,10 @@ def agent_complete_objective() -> str:
     data.goal = None
     data.context = None
 
-    base = Path("/home/luuppi/vm_drive/null-shift")
-    (base / "plan.md").unlink(True)
-    (base / "task.md").unlink(True)
+    if remove_artifacts:
+        base = Path("/home/luuppi/vm_drive/null-shift")
+        (base / "plan.md").unlink(True)
+        (base / "task.md").unlink(True)
     return "Objective marked as completed. Provide a final answer to the user. Note that the user cannot clearly see the messages you sent while completing objective."
 
 
