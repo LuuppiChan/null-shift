@@ -60,6 +60,11 @@ class PromptHelper:
         return bool(self.parts)
 
 
+def xml_tag(content: str | Any, tag: str, description: str = "") -> str:
+    """xml tag macro"""
+    return f"<{tag}{f' description="{description}"' if description else ''}>\n{content}\n</{tag}>"
+
+
 def enforce_character_limit(text: str, limit: int | None = None) -> str:
     """Enforce character limit on text outputs."""
     if limit is None:
@@ -192,14 +197,44 @@ def compress_video(
         return base64_str
 
 
-def compress_audio(audio_path: str | Path) -> Optional[str]:
+def compress_audio(
+    audio_path: str | Path,
+    start: Optional[float] = None,
+    end: Optional[float] = None,
+) -> Optional[str]:
     """
     Returns a compressed base64 string of an audio.
     Mime type is 'audio/aac'
     Returns None if ffmpeg didn't write anything or returned a non-zero code.
+
+    start and end are timestamps in seconds.  When both are provided
+    the clip runs from start to end; when only one is provided the clip
+    runs from start to the end of the file or from the beginning to end.
     """
+    trim_flags_pre: list[str] = []
+    trim_flags_post: list[str] = []
+
+    if start is not None:
+        trim_flags_pre.extend(["-ss", str(start)])
+
+    if start is not None and end is not None:
+        duration = max(0.0, end - start)
+        trim_flags_post.extend(["-t", str(duration)])
+    elif end is not None:
+        trim_flags_post.extend(["-to", str(end)])
+
     with tempfile.NamedTemporaryFile(suffix=".aac") as temp_file:
-        cmd = ["ffmpeg", "-y", "-i", str(audio_path), "-b:a", "128k", temp_file.name]
+        cmd = [
+            "ffmpeg",
+            "-y",
+            *trim_flags_pre,
+            "-i",
+            str(audio_path),
+            *trim_flags_post,
+            "-b:a",
+            "128k",
+            temp_file.name,
+        ]
 
         process = subprocess.run(cmd, capture_output=True)
 

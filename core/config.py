@@ -189,6 +189,7 @@ class HistoryConfig(BaseModel):
     compression_threshold: int = 30
     compression_target_length: int = 15
     aggressive_compression: bool = False
+    compression_timeout: float | None = None
 
 
 class SocketConfig(BaseModel):

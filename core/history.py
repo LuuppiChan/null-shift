@@ -1,3 +1,4 @@
+import asyncio
 import copy
 import json
 import logging
@@ -30,9 +31,7 @@ class History:
         self.added = Signal(BaseMessage)
         self.last_compression: AIMessage | None = None
 
-    def with_system_message(
-        self, system_message: SystemMessage, compression: bool = False
-    ) -> list[BaseMessage]:
+    def with_system_message(self, system_message: SystemMessage) -> list[BaseMessage]:
         """Get the history with your system message."""
         # Shallow list in python, cheap
         return [system_message] + self.messages
@@ -235,11 +234,10 @@ class History:
         for i, msg in enumerate(self.messages):
             if isinstance(msg, HumanMessage):
                 positions.append(i)
-            # This fucked the system
-            # Also adding this feature WILL ALSO degrade the answer quality and make possible infinite loops
-            # Future me, trust the past me when I realized the agent was looping for no reason for 30 minutes.
-            # elif isinstance(msg, (AIMessage, AIMessageChunk)) and cfg.core_history_compression:
-            #     positions.append(i)
+            elif cfg.history.aggressive_compression and isinstance(
+                msg, (AIMessage, AIMessageChunk)
+            ):
+                positions.append(i)
 
         # removing this also fucked the trimming
         if positions:
@@ -303,19 +301,53 @@ class History:
                 len(self.messages),
                 length,
             )
+            # Ensure the first message is valid (not AI or Tool)
+            if self.messages and not isinstance(self.messages[0], HumanMessage):
+                self.messages = [
+                    HumanMessage(
+                        "[SYSTEM: Context was compressed or trimmed earlier in the conversation. Continue where we left off.]"
+                    )
+                ] + self.messages
             return
 
         summary = None
         if cfg.history.compression:
             try:
-                # it's intended to summarize the full history.
-                # the popped_messages might be useful for something later.
-                summary = await self.summarize_history()
-                # self.messages = summary + self.messages
+                # apply timeout
+                if cfg.history.compression_timeout is not None:
+                    try:
+                        summary = await asyncio.wait_for(
+                            self.summarize_history(), cfg.history.compression_timeout
+                        )
+                    except TimeoutError:
+                        logger.warning("Summary timeout")
+
+                    if summary is None:
+                        raise Exception("Failed to compress history")
+                else:
+                    summary = await self.summarize_history()
             except Exception as e:
                 logger.warning("Didn't compress the history: %s", e)
-                # Because I don't want to lose my history on an error.
                 self.messages = popped_messages + self.messages
+                summary = None
+
+        # Insert summary into history as a Human→AI pair if compression succeeded
+        if summary is not None:
+            # change this to not make the AI break out of the current summary style.
+            human_prompt = HumanMessage(
+                "Please summarize the conversation so far for context retention."
+            )
+
+            # Determine if we need a transition Human message
+            needs_transition = self.messages and not isinstance(
+                self.messages[0], HumanMessage
+            )
+
+            if needs_transition:
+                transition = HumanMessage("Continue with the conversation.")
+                self.messages = [human_prompt, summary, transition] + self.messages
+            else:
+                self.messages = [human_prompt, summary] + self.messages
 
         # Move this here because it's more logical to be here instead of before pop messages return
         logger.info("History trimmed %s/%s", len(self.messages), length_threshold)
@@ -346,6 +378,7 @@ class History:
         logger.info("Summarizing history...")
 
         full = None
+        exception = None
         for _ in range(3):
             try:
                 async for chunk in llm.stream([system] + messages + [human], None):
@@ -353,12 +386,16 @@ class History:
                 break
             except Exception as e:
                 logger.error("Creating summary failed: %s", e)
+                exception = e
+                full = None
 
         if full is not None and content_exists(full.content):
             self.last_compression = full
             return full
         else:
-            logger.error("Error summarizing history. Nothing changed.")
+            logger.error("Error summarizing history.")
+            if exception is not None:
+                raise exception
 
 
 @deprecated("Use History.summarize_history instead")

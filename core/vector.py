@@ -330,7 +330,8 @@ class Vector:
         )
 
         async for chunk in self.llm.stream(
-            self.history.with_system_message(context), list(tools.values())
+            self.history.with_system_message(context),
+            list(tools.values()),
         ):
             logger.debug("Full chunk: %s", chunk)
             # To only get the text delta

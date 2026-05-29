@@ -13,7 +13,7 @@ class LogManager:
         self.current_log_path = cfg.log.file_path
         self.log_to_file = cfg.log.to_file
         self._formatter = logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(name)s — %(message)s", datefmt="%H:%M:%S"
+            "%(asctime)s [%(levelname)s] %(name)s — %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
         )
         self._init_logging()
         self._reload_logging(cfg)
