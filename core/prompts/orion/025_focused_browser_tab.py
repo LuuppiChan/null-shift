@@ -5,7 +5,7 @@ Definitions and Specifications: Provide clear, explicit, specific, and complete 
 from typing import Any
 
 import zmq
-from core.helpers import PromptHelper
+from core.helpers import PromptHelper, xml_tag
 from core.core_data import data
 from global_types import BusMessage
 from tools.browser.message_types import Action
@@ -53,7 +53,7 @@ def send_browser_request(_action: str, **kwargs: Any) -> Any:
         socket.close()
 
 
-def browser_list_tabs() -> list[dict[str, int | bool | str]]:
+def browser_list_tabs() -> str:
     """
     Lists all currently open tabs with their index, title, url, and active state.
 
@@ -65,22 +65,15 @@ def browser_list_tabs() -> list[dict[str, int | bool | str]]:
 
 
 def collect() -> str | None:
-    prompt = PromptHelper("dynamic_context")
-    prompt.add_part(
-        "This section contains dynamic data about the surrounding environment meaning it's always up-to-date.\nThis information may or may not be relevant to your task, it is up for you to decide.",
-        "description",
-    )
-    prompt.add_part(data.datetime(), "datetime")
-    prompt.add_part(data.home_path(), "user_home_path")
-    prompt.add_part(
-        data.scratchpad(),
-        "assistant_scratchpad_path",
-        "This is your dedicated workspace. You can freely read, write, and modify files here. Use this directory to draft code, store intermediate data, write down step-by-step plans, or keep track of your thoughts during complex tasks. Consider it your working memory.",
-    )
     try:
-        focused = [tab for tab in browser_list_tabs() if tab.get("active")][0]
-        prompt.add_part(focused, "currently_focused_browser_tab", "Currently focused browser tab. To read the contents use the get DOM tool.")
-    except (IndexError, AttributeError):
-        print("Error indexing browser tabs. No active tab.")
+        focused = [tab for tab in browser_list_tabs().split("\n") if "active" in tab]
+        if not focused:
+            return None
 
-    return prompt.compile()
+        return xml_tag(
+            focused,
+            "currently_focused_browser_tab",
+            "Possibly the currently focused browser tab. To read the contents use the get DOM tool.",
+        )
+    except Exception as e:
+        print("Error indexing browser tabs.", e)
