@@ -258,18 +258,19 @@ class CoreConfig(BaseModel):
 
     def get_model(self, identifier: ModelIdentifier) -> ModelInfo:
         """Get model based on identifier."""
+        if model := self.llm.model_tiers.get(self.llm.default.name):
+            self.llm.default = model
+
         if isinstance(identifier, ModelInfo):
             if identifier.name in self.llm.model_tiers:
                 return self.llm.default.with_overrides(self.llm.model_tiers[identifier.name])
             return self.llm.default.with_overrides(identifier)
         elif identifier is None:
-            if model := self.llm.model_tiers.get(self.llm.default.name):
-                self.llm.default = model
             return self.llm.default
         elif model := self.llm.model_tiers.get(identifier):
             return model
 
-        return self.get_model(ModelInfo(name=identifier))
+        return self.llm.default.with_overrides(ModelInfo(name=identifier))
 
 
 class RuntimeState(BaseModel):
