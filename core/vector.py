@@ -383,7 +383,9 @@ class Vector:
                     logger.error("LLM message content not recognized: %r", content)
 
             if out_msg.reasoning is None:
-                reasoning_content = chunk.additional_kwargs.get("reasoning_content")
+                reasoning_content = chunk.additional_kwargs.get(
+                    "reasoning_content"
+                ) or chunk.additional_kwargs.get("reasoning")
                 if reasoning_content:
                     out_msg.reasoning = reasoning_content
 
@@ -392,7 +394,9 @@ class Vector:
         # send full response
         out_msg = OutputMessage()
         if full_response is not None:
-            out_msg.reasoning = full_response.additional_kwargs.get("reasoning_content")
+            out_msg.reasoning = full_response.additional_kwargs.get(
+                "reasoning_content"
+            ) or full_response.additional_kwargs.get("reasoning")
 
         if full_response and isinstance(full_response.content, list):
             text_parts = []

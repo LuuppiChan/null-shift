@@ -25,7 +25,7 @@ def _patched_convert_delta(
             chunk.additional_kwargs["reasoning_content"] = _dict["reasoning_content"]
         # openrouter
         elif "reasoning" in _dict:
-            chunk.additional_kwargs["reasoning_content"] = _dict["reasoning"]
+            chunk.additional_kwargs["reasoning"] = _dict["reasoning"]
     return chunk
 
 
