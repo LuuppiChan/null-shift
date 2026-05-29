@@ -168,7 +168,7 @@ class BrowserControl:
                         await self.send(
                             "\n".join(
                                 [
-                                    f"[{tab['index']}]: {tab['title']} ({tab['url']})"
+                                    f"[{tab['index']} (active: {tab["active"]})]: {tab['title']} ({tab['url']})"
                                     for tab in tabs
                                 ]
                             )
