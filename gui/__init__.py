@@ -7,12 +7,12 @@ from pathlib import Path
 from typing import Any, Literal
 
 import flet as ft
-from pydantic import ValidationError
 import zmq.asyncio
 
 from global_tools import Signal
 from global_types import BusMessage, Commands, Difficulty, InputMessage, MessageTopic
 from output_message import OutputMessage
+from gui.config import manager
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +230,7 @@ class AutoConfig(ft.Column):
 @ft.control
 class Input(ft.Container):
     def init(self):
+        # bug: no scrolling currently.
         self.input = ft.TextField(
             multiline=True,
             hint_text="Send a Message",
@@ -243,7 +244,7 @@ class Input(ft.Container):
         self.bgcolor = ft.Colors.BLACK_54
         self.padding = ft.Padding(24, 16, 24, 16)
 
-        self.content = self.input
+        self.content = ft.Column([self.input])
         self.on_send: Signal[str, None] = Signal(str)
 
     def send(self):
@@ -256,6 +257,7 @@ class Input(ft.Container):
 @ft.control
 class Message(ft.Container):
     def init(self):
+        cfg = manager.get_config()
         self.text = good_markdown(visible=False)
         self.padding = 16
         self.margin = 4
@@ -263,15 +265,17 @@ class Message(ft.Container):
         self.border_radius = 16
         self.bgcolor = ft.Colors.BLACK_54
         self.avatar = ft.Markdown("**Orion**", visible=False)
-        self.loading = ft.Column([ft.ProgressRing(), ft.Divider(height=400, opacity=0)])
+        self.loading = ft.Column([ft.ProgressRing()])
+        self.space = ft.Divider(height=400, opacity=0, visible=cfg.end_space)
         self.is_ai: bool = False
         self.is_tool: bool = False
         self.tool_name: str = ""
+        self.tool_id: str = ""
         self.thought_markdown = good_markdown(visible=False)
         self.tool_call = good_markdown(visible=False)
-        self.tool_result = ft.Text(visible=False)
+        self.tool_result: ft.Text | ft.Markdown = ft.Text(visible=False)
         self.thoughts = ft.ExpansionTile(
-            "Thoughts",
+            "Reasoning",
             [
                 thought_column := ft.Column(
                     [self.thought_markdown, self.tool_call, self.tool_result],
@@ -281,9 +285,13 @@ class Message(ft.Container):
             ],
             visible=False,
             on_change=self.change_size_limit,
+            expanded=cfg.default_collapse_state,
         )
         self.thought_column = thought_column
-        self.content = ft.Column([self.avatar, self.thoughts, self.text, self.loading])
+
+        self.content = ft.Column(
+            [self.avatar, self.thoughts, self.text, self.loading, self.space]
+        )
 
     def change_size_limit(self):
         if not self.is_tool:
@@ -301,6 +309,8 @@ class Message(ft.Container):
         if thoughts:
             self.thought_markdown.value += thoughts
             self.thought_markdown.visible = True
+            cfg = manager.get_config()
+            self.thoughts.tooltip = self.thought_markdown.value[-cfg.tooltip_len:]
             self.thoughts.visible = True
 
     @staticmethod
@@ -318,20 +328,25 @@ class Message(ft.Container):
         msg = Message()
         msg.append_text(text)
         msg.align = ft.Alignment.CENTER_RIGHT
+        msg.space.visible = False
         return msg
 
     @staticmethod
-    def tool(name: str, args: dict[str, Any]) -> "Message":
+    def tool(name: str, id: str, args: dict[str, Any]) -> "Message":
+        cfg = manager.get_config()
         msg = Message()
         msg.thoughts.title = f"Tool call: `{name}`"
+        msg.thoughts.tooltip = f"Arguments:\njson\n{json.dumps(args, indent=4)[-cfg.tooltip_len:]}\n"
         msg.thoughts.visible = True
         msg.tool_call.value = f"**Tool Name:** {name}\n\n**Arguments:**\n```json\n{json.dumps(args, indent=2)}\n```"
         msg.tool_call.visible = True
         msg.tool_name = name
+        msg.tool_id = id
         msg.align = ft.Alignment.CENTER_LEFT
         msg.bgcolor = ft.Colors.BLACK_12
         msg.is_tool = True
         msg.loading.visible = False
+        msg.space.visible = False
         return msg
 
     def add_tool_response(
@@ -340,6 +355,7 @@ class Message(ft.Container):
         if isinstance(content, (dict, list)):
             content = json.dumps(content, indent=2)
             content = f"```json\n{content}\n```"
+            self.tool_result = good_markdown()
 
         self.tool_result.value = "Tool returned:\n\n" + content
         self.tool_result.visible = True
@@ -395,9 +411,12 @@ class Chat(ft.Container):
         )
 
         self.messages: ft.ListView = ft.ListView(
-            controls=[], scroll=ft.ScrollMode.AUTO, expand=True, auto_scroll=True
+            controls=[], scroll=ft.ScrollMode.AUTO, expand=True, expand_loose=True, auto_scroll=True
         )
-        self.column = ft.Column([self.messages, self.input], expand=True)
+        self.column = ft.Column(
+            [self.messages, ft.Column([self.input])],
+            expand=True,
+        )
         self.row = ft.Row([self.column, self.settings], expand=True)
         self.stack = ft.Stack([self.row])
         self.content = ft.SelectionArea(self.stack)
@@ -444,8 +463,15 @@ class Chat(ft.Container):
                             self.add_message(Message.user("History deleted."))
                         case "c":
                             self.messages.controls.clear()
+                        case "crm" | "rmc" | "rm c" | "c rm":
+                            Path("/home/luuppi/.null-shift/brain/history.json").unlink(
+                                missing_ok=True
+                            )
+                            self.messages.controls.clear()
                         case _:
                             self.add_message(Message.user(f"Unknown argument '{arg}'"))
+                case _:
+                    self.add_message(Message.user(f"Unknown command: '{command}'"))
             self.input.input.value = ""
             self.update()
             return
@@ -492,7 +518,7 @@ class Chat(ft.Container):
                                 continue
                             self.append_text().loading.visible = False
                             self.add_message(
-                                Message.tool(out.tool_name or "", out.tool_args or {})
+                                Message.tool(out.tool_name or "", out.tool_call_id or "", out.tool_args or {})
                             )
                         case MessageTopic.TOOL_RESULT:
                             out = OutputMessage.from_bus(msg)
@@ -501,10 +527,10 @@ class Chat(ft.Container):
                                 continue
 
                             tool = self.append_last(
-                                type="tool", tool_name=out.tool_name or ""
+                                type="tool", tool_id=out.tool_call_id or ""
                             )
                             if tool is None:
-                                tool = Message.tool(out.tool_name or "", {})
+                                tool = Message.tool(out.tool_name or "", out.tool_call_id or "", {})
                             tool.add_tool_response(
                                 out.tool_result or "(No return value)"
                             )
@@ -524,8 +550,11 @@ class Chat(ft.Container):
         except asyncio.CancelledError:
             logger.info("Shutting down listener.")
 
-    def add_message(self, *messages: Message):
-        self.messages.controls.extend(messages)
+    def add_message(self, message: Message):
+        if self.messages.controls:
+            assert isinstance(self.messages.controls[-1], Message)
+            self.messages.controls[-1].space.visible = False
+        self.messages.controls.append(message)
 
     def append_text(self, text: str = "", thoughts: str = "", idx: int = -1) -> Message:
         """Append text to last message or specified index."""
@@ -542,9 +571,10 @@ class Chat(ft.Container):
         text: str = "",
         thoughts: str = "",
         type: Literal["ai", "tool"] = "ai",
-        tool_name: str = "",
+        tool_id: str = "",
     ) -> Message | None:
         """Append to last some message."""
+        # appending fails if same tool name on multiple tools
         for i in range(len(self.messages.controls) - 1, -1, -1):
             msg = self.messages.controls[i]
 
@@ -554,7 +584,7 @@ class Chat(ft.Container):
                     if msg.is_ai:
                         return self.append_text(text, thoughts, i)
                 case "tool":
-                    if msg.is_tool and msg.tool_name == tool_name:
+                    if msg.is_tool and msg.tool_id == tool_id:
                         return self.append_text(text, thoughts, i)
         return None
 
@@ -590,6 +620,11 @@ async def main(page: ft.Page):
     page.window.on_event = on_close
     page.window.frameless = True
     page.theme_mode = ft.ThemeMode.DARK
+    # page.scroll = ft.ScrollMode.AUTO
+
+    # no worky right now
+    # page.window.bgcolor = ft.Colors.TRANSPARENT
+    # page.bgcolor = ft.Colors.TRANSPARENT
 
     chat = Chat()
     page.add(chat)
