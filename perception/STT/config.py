@@ -7,11 +7,12 @@ Contains configuration management for the STT node.
 import logging
 from pathlib import Path
 from typing import Any
-import tomllib
 
+import tomllib
 from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
+
 
 class STTConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -59,7 +60,7 @@ class ConfigManager:
         if self.path.exists():
             current_mtime = self.path.stat().st_mtime
             if current_mtime > self._last_mtime:
-                self._config = with_overrides(type(self._config), self.path) # type: ignore
+                self._config = with_overrides(type(self._config), self.path)  # type: ignore
                 logger.info(
                     "Config was changed %s -> %s. Reloaded.",
                     self._last_mtime,

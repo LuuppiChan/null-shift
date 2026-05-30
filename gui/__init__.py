@@ -3,7 +3,10 @@ from datetime import datetime
 import json
 import asyncio
 import logging
+import os
 from pathlib import Path
+import subprocess
+import sys
 from typing import Any, Literal
 
 import flet as ft
@@ -11,135 +14,29 @@ import zmq.asyncio
 
 from global_tools import Signal
 from global_types import BusMessage, Commands, Difficulty, InputMessage, MessageTopic
+from gui.stt import Transcriber
 from output_message import OutputMessage
 from gui.config import manager
 
 logger = logging.getLogger(__name__)
 
-AI_EXAMPLE = """Here is a complete, modern approach to creating a sticky header. 
 
-Today, the actual "sticking" behavior is best done using pure **CSS** (`position: sticky`). However, **JavaScript** is often used to add visual effects when the user scrolls (like shrinking the header, adding a shadow, or slightly changing the background color). 
+def open_in_default_editor(file_path: str):
+    """Open a file in the system's default text editor."""
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
 
-Here is the complete HTML, CSS, and JavaScript to achieve both.
-
-### 1. The HTML
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sticky Header</title>
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
-
-    <!-- The Header -->
-    <header id="site-header">
-        <div class="logo">MyBrand</div>
-        <nav>
-            <a href="#">Home</a>
-            <a href="#">About</a>
-            <a href="#">Contact</a>
-        </nav>
-    </header>
-
-    <!-- Dummy content to allow scrolling -->
-    <main>
-        <h1>Scroll down to see the effect</h1>
-        <p>Keep scrolling...</p>
-    </main>
-
-    <script src="script.js"></script>
-</body>
-</html>
-```
-
-### 2. The CSS
-The CSS handles the layout, the actual sticky positioning, and a special `.scrolled` class that JavaScript will trigger later.
-
-```css
-/* Basic Reset */
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-
-body {
-    font-family: sans-serif;
-}
-
-/* --- HEADER STYLES --- */
-header {
-    background-color: #1a1a1a;
-    color: white;
-    padding: 30px 50px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    
-    /* The Magic CSS to make it sticky */
-    position: sticky;
-    top: 0;
-    z-index: 1000; /* Ensures it stays above other content */
-    
-    /* Smooth transition for when JavaScript changes the styles */
-    transition: all 0.3s ease-in-out; 
-}
-
-header nav a {
-    color: white;
-    text-decoration: none;
-    margin-left: 20px;
-    font-weight: bold;
-}
-
-/* --- JAVASCRIPT TRIGGERED CLASS --- */
-/* This class is added by JS when the user scrolls down */
-header.scrolled {
-    padding: 15px 50px; /* Shrinks the header */
-    background-color: rgba(26, 26, 26, 0.95); /* Adds slight transparency */
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3); /* Adds a drop shadow */
-}
-
-/* Dummy content styling to make the page scrollable */
-main {
-    height: 2000px;
-    padding: 50px;
-    background: linear-gradient(to bottom, #f4f4f4, #cccccc);
-}
-```
-
-### 3. The JavaScript
-The JavaScript listens for the user to scroll. If they scroll down further than 50 pixels, it adds the `.scrolled` class to the header. If they scroll back to the top, it removes the class.
-
-```javascript
-// Select the header element
-const header = document.getElementById('site-header');
-
-// Listen for the scroll event on the window
-window.addEventListener('scroll', () => {
-    
-    // Check how far the user has scrolled down the Y axis
-    if (window.scrollY > 50) {
-        // If scrolled past 50px, add the 'scrolled' class
-        header.classList.add('scrolled');
-    } else {
-        // If at the top of the page, remove the 'scrolled' class
-        header.classList.remove('scrolled');
-    }
-    
-});
-```
-
-### How it works:
-1. **`position: sticky; top: 0;`**: This CSS rule tells the browser to treat the header as part of the normal document flow until the user scrolls past it. Once it reaches `0px` from the top of the screen, it "sticks" there.
-2. **`z-index: 1000;`**: This ensures the header doesn't hide underneath your text or images as you scroll down.
-3. **The JavaScript Event Listener**: By using `window.addEventListener('scroll')`, we can detect the exact moment a user starts scrolling and animate the header so it shrinks and gains a shadow, which is a very popular modern UI pattern."""
-USER_EXAMPLE = (
-    """Show me a code snippet of a website's sticky header in CSS and JavaScript."""
-)
+    if sys.platform.startswith("win"):
+        os.startfile(file_path)
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", file_path])
+    else:
+        # Linux/Unix: Try EDITOR env var, then xdg-open
+        # editor = os.environ.get("EDITOR") or os.environ.get("VISUAL")
+        # if editor:
+        #     subprocess.Popen([editor, file_path])
+        # else:
+        subprocess.Popen(["xdg-open", file_path])
 
 
 def good_markdown(value: str = "", visible: bool = True) -> ft.Markdown:
@@ -237,15 +134,52 @@ class Input(ft.Container):
             border=ft.InputBorder.NONE,
             expand=True,
             on_submit=self.send,
+            on_change=self.text_changed,
             shift_enter=True,
         )
         self.shape = ft.BoxShape.RECTANGLE
         self.border_radius = 16
         self.bgcolor = ft.Colors.BLACK_54
-        self.padding = ft.Padding(24, 16, 24, 16)
+        self.padding = ft.Padding(24, 12, 16, 12)
 
-        self.content = ft.Column([self.input])
+        self.voice_text = "Start voice input"
+        self.mic = ft.IconButton(
+            ft.Icons.MIC, on_click=self.on_voice_button, tooltip=self.voice_text
+        )
+        self.transcriber = Transcriber()
+        self.transcriber.on_input.connect(self.on_voice)
+
+        self.content = ft.Row([self.input, self.mic])
         self.on_send: Signal[str, None] = Signal(str)
+
+    async def on_voice_button(self):
+        text = self.input.value
+        if self.transcriber.running:
+            await self.transcriber.stop()
+        elif text:
+            self.send()
+        else:
+            await self.transcriber.start()
+        self.text_changed()
+
+    def text_changed(self):
+        text = self.input.value
+        if self.transcriber.running:
+            self.mic.icon = ft.Icons.STOP
+            self.mic.tooltip = "Stop voice input"
+        elif text:
+            self.mic.icon = ft.Icons.SEND
+            self.mic.tooltip = "Send message"
+        else:
+            self.mic.tooltip = self.voice_text
+            self.mic.icon = ft.Icons.MIC
+
+    async def on_voice(self, text: str):
+        print("On voice:", text)
+        self.input.value += " " + text if self.input.value else text
+        self.update()
+        if manager.get_config().auto_send_voice:
+            self.send()
 
     def send(self):
         text = self.input.value
@@ -310,7 +244,7 @@ class Message(ft.Container):
             self.thought_markdown.value += thoughts
             self.thought_markdown.visible = True
             cfg = manager.get_config()
-            self.thoughts.tooltip = self.thought_markdown.value[-cfg.tooltip_len:]
+            self.thoughts.tooltip = self.thought_markdown.value[-cfg.tooltip_len :]
             self.thoughts.visible = True
 
     @staticmethod
@@ -336,7 +270,9 @@ class Message(ft.Container):
         cfg = manager.get_config()
         msg = Message()
         msg.thoughts.title = f"Tool call: `{name}`"
-        msg.thoughts.tooltip = f"Arguments:\njson\n{json.dumps(args, indent=4)[-cfg.tooltip_len:]}\n"
+        msg.thoughts.tooltip = (
+            f"Arguments:\njson\n{json.dumps(args, indent=4)[-cfg.tooltip_len :]}\n"
+        )
         msg.thoughts.visible = True
         msg.tool_call.value = f"**Tool Name:** {name}\n\n**Arguments:**\n```json\n{json.dumps(args, indent=2)}\n```"
         msg.tool_call.visible = True
@@ -411,7 +347,11 @@ class Chat(ft.Container):
         )
 
         self.messages: ft.ListView = ft.ListView(
-            controls=[], scroll=ft.ScrollMode.AUTO, expand=True, expand_loose=True, auto_scroll=True
+            controls=[],
+            scroll=ft.ScrollMode.AUTO,
+            expand=True,
+            expand_loose=True,
+            auto_scroll=True,
         )
         self.column = ft.Column(
             [self.messages, ft.Column([self.input])],
@@ -518,7 +458,11 @@ class Chat(ft.Container):
                                 continue
                             self.append_text().loading.visible = False
                             self.add_message(
-                                Message.tool(out.tool_name or "", out.tool_call_id or "", out.tool_args or {})
+                                Message.tool(
+                                    out.tool_name or "",
+                                    out.tool_call_id or "",
+                                    out.tool_args or {},
+                                )
                             )
                         case MessageTopic.TOOL_RESULT:
                             out = OutputMessage.from_bus(msg)
@@ -530,7 +474,9 @@ class Chat(ft.Container):
                                 type="tool", tool_id=out.tool_call_id or ""
                             )
                             if tool is None:
-                                tool = Message.tool(out.tool_name or "", out.tool_call_id or "", {})
+                                tool = Message.tool(
+                                    out.tool_name or "", out.tool_call_id or "", {}
+                                )
                             tool.add_tool_response(
                                 out.tool_result or "(No return value)"
                             )
@@ -629,6 +575,16 @@ async def main(page: ft.Page):
     chat = Chat()
     page.add(chat)
     page.overlay.append(chat.open_settings)
+    page.overlay.append(
+        ft.IconButton(
+            ft.Icons.SETTINGS,
+            tooltip="Open GUI settings",
+            on_click=lambda: open_in_default_editor(str(manager.path)),
+            align=ft.Alignment.TOP_LEFT,
+            padding=16,
+            margin=8,
+        )
+    )
 
 
 ctx: zmq.asyncio.Context
