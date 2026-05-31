@@ -20,6 +20,8 @@ class STTConfig(BaseModel):
     ignore_fuzz_ratio: int = 95
     ignore_list: list[str] = Field(default_factory=list)
 
+    wake_word: str | list[str] | None = None
+
 
 class GuiConfig(BaseModel):
     default_collapse_state: bool = False

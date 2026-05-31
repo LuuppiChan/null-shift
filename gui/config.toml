@@ -1,7 +1,7 @@
 default_collapse_state = false
 end_space = true
 tooltip_len = 500
-auto_send_voice = false
+auto_send_voice = true
 
 [voice]
 stt_model_path = "/home/luuppi/Documents/coding/python_projects/assistant/models/whisper_cpp/ggml-large-v3-turbo-q5_0.bin"
@@ -13,6 +13,8 @@ non_speaking_duration = 1.2
 
 tts_vad_sensitivity = 5.0
 tts_vad_consecutive_chunks = 3
+
+wake_word = ["orion", "computer", "tietokone"]
 
 ignore_fuzz_ratio = 95
 ignore_list = [

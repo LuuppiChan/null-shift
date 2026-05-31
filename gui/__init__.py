@@ -140,7 +140,7 @@ class Input(ft.Container):
         self.shape = ft.BoxShape.RECTANGLE
         self.border_radius = 16
         self.bgcolor = ft.Colors.BLACK_54
-        self.padding = ft.Padding(24, 12, 16, 12)
+        self.padding = ft.Padding(16, 12, 16, 12)
 
         self.voice_text = "Start voice input"
         self.mic = ft.IconButton(
@@ -149,7 +149,20 @@ class Input(ft.Container):
         self.transcriber = Transcriber()
         self.transcriber.on_input.connect(self.on_voice)
 
-        self.content = ft.Row([self.input, self.mic])
+        # todo: attach files
+        # file selecting, pasting, dragging
+        self.file_button = ft.IconButton(ft.Icons.ADD, tooltip="Attach files")
+
+        self.row = ft.Row(
+            [
+                # self.file_button,
+                self.input,
+                self.mic,
+            ]
+        )
+        # add attached files list here
+        self.column = ft.Column([self.row])
+        self.content = self.column
         self.on_send: Signal[str, None] = Signal(str)
 
     async def on_voice_button(self):
@@ -175,10 +188,20 @@ class Input(ft.Container):
             self.mic.icon = ft.Icons.MIC
 
     async def on_voice(self, text: str):
-        print("On voice:", text)
-        self.input.value += " " + text if self.input.value else text
+        self.input.value += "\n" + text if self.input.value else text
         self.update()
-        if manager.get_config().auto_send_voice:
+        cfg = manager.get_config()
+        text = self.input.value.lower()
+        # it's more readable this way
+        contains_wake_word = False
+        if not cfg.voice.wake_word:
+            contains_wake_word = True
+        elif isinstance(cfg.voice.wake_word, str) and cfg.voice.wake_word.lower() in text:
+            contains_wake_word = True
+        elif isinstance(cfg.voice.wake_word, list) and any([word.lower() in text for word in cfg.voice.wake_word]):
+            contains_wake_word = True
+
+        if cfg.auto_send_voice and contains_wake_word:
             self.send()
 
     def send(self):
