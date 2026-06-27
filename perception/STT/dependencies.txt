@@ -1,7 +1,0 @@
-pydantic
-pyzmq
-numpy
-SpeechRecognition
-thefuzz
-pywhispercpp # the git version for vulkan support
-PyAudio
