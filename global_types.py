@@ -234,7 +234,6 @@ async def run_batch_ordered[T](
             name=func.__name__,
         )
         tasks.append(task)
-        task.done
 
     while not all(map(lambda t: t.done(), tasks)):
         await sleep(0.05)

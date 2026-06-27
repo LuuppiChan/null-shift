@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 from pathlib import Path
 from typing import Any, Optional, cast
@@ -443,13 +442,13 @@ class Vector:
             args = tool_call["args"]
             call_id = tool_call["id"]
 
-            @tool
-            def inexistent(*args: Any, **kwargs: Any) -> str:
+            @tool(name)
+            def inexistent(*args: Any, _name: str = name, **kwargs: Any) -> str:
                 """Inexistent tool placeholder."""
                 logger.warning(
-                    "LLM called tool %s with args %s and kwargs %s", name, args, kwargs
+                    "LLM called tool %s with args %s and kwargs %s", _name, args, kwargs
                 )
-                return f"You tried to call an inexistent tool '{name}'."
+                return f"You tried to call an inexistent tool '{_name}'."
 
             func = tools.get(name, inexistent)
 
