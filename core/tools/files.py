@@ -125,6 +125,7 @@ def file_read(
     start_line: Optional[int | float] = None,
     end_line: Optional[int | float] = None,
     character_limit: int | None = None,
+    show_line_numbers: bool = False,
 ) -> str | list[str | dict[str, str]]:
     """
     Primary file reading tool.
@@ -151,6 +152,7 @@ def file_read(
         start_line: Optional line to start the read at. Starts at the first line if not specified. (1-indexed)
         end_line: Optional line to end the read at. Reads to the end if not specified. (exclusive)
         character_limit: Max character limit. None means default max character limit.
+        show_line_numbers: Show line numbers when reading text.
     """
     resolved_path, err = _validate_and_resolve_path(file_path, "read")
     if err:
@@ -280,7 +282,13 @@ def file_read(
             )
     else:
         # if mime.startswith("text/") or any([mime.startswith(t) for t in SAFE_APP_TYPES]):
-        lines = path.read_text(errors="replace").splitlines()
+        if show_line_numbers:
+            lines = [
+                f"{i + 1}" + line
+                for i, line in enumerate(path.read_text(errors="replace").splitlines())
+            ]
+        else:
+            lines = path.read_text(errors="replace").splitlines()
         start_line = round(start_line)
         if end_line is None:
             text = lines[start_line:]
@@ -404,14 +412,17 @@ def file_write(
 
 
 @tool
-def file_glob(pattern: str, file_path: str | Artifacts) -> str:
+def file_glob(
+    pattern: str, file_path: str | Artifacts, case_sensitive: bool = False
+) -> str:
     """
     Find files matching a glob pattern across the system.
-    Searches the workspace using glob patterns (e.g., **/*.md).
+    Searches the workspace using glob patterns (e.g., ~/some/project/**/*.md).
 
     Args:
         pattern: Glob pattern
         file_path: Absolute path to the directory to start the glob search from, or an artifact name.
+        case_sensitive: Whether the globbing is case sensitive or not.
     """
     resolved_path, err = _validate_and_resolve_path(file_path, "read")
     if err:
@@ -430,10 +441,15 @@ def file_glob(pattern: str, file_path: str | Artifacts) -> str:
 
         found_files = []
         files = asyncio.run(
-            run_killable(lambda: list(path_obj.glob(pattern)), timeout=timeout)
+            run_killable(
+                lambda: list(path_obj.glob(pattern, case_sensitive=case_sensitive)),
+                timeout=timeout,
+            )
         )
         if files is None:
-            raise TimeoutError("Globbing took too long and timed out")
+            raise TimeoutError(
+                f"Globbing took too long and timed out ({timeout} seconds)"
+            )
 
         for p in files:
             if not p.is_file():  # Only search files
