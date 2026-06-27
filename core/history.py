@@ -317,7 +317,7 @@ class History:
                 if cfg.history.compression_timeout is not None:
                     try:
                         summary = await asyncio.wait_for(
-                            self.summarize_history(), cfg.history.compression_timeout
+                            self.summarize_history(popped_messages + self.messages), cfg.history.compression_timeout
                         )
                     except TimeoutError:
                         logger.warning("Summary timeout")
