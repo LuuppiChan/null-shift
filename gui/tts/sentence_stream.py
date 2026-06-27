@@ -30,6 +30,7 @@ class SentenceStream:
                             while await chars.peek(3) != "```":
                                 await chars.skip()
                             await chars.skip(3)
+                            buf += "Code block."
                         else:
                             await chars.skip()
                             while await chars.peek() != "`":
