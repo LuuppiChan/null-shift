@@ -30,6 +30,9 @@ def main():
         description="Null-shift: next generation modular AI agent system."
     )
     parser.add_argument("module", help="What module to launch")
+    parser.add_argument(
+        "-t", "--tools", action="store_true", help="launch tools with the core"
+    )
 
     # Optional argument (with a default value)
     # parser.add_argument("-g", "--greeting", default="Hello", help="The greeting to use")
@@ -38,6 +41,11 @@ def main():
 
     match args.module:
         case "core":
+            if args.tools:
+                import multiprocessing
+
+                multiprocessing.Process(target=launch_tools).start()
+
             import core
 
             core.run()
