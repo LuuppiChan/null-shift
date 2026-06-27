@@ -1,11 +1,17 @@
 default_collapse_state = false
 end_space = true
+end_space_height = 200
 tooltip_len = 500
 auto_send_voice = true
+send_pdf_bin = false
+
+[voice.whisper]
+model_path = "/home/luuppi/Documents/coding/python_projects/assistant/models/whisper_cpp/ggml-large-v3-turbo-q5_0.bin"
+threads = 12
 
 [voice]
-stt_model_path = "/home/luuppi/Documents/coding/python_projects/assistant/models/whisper_cpp/ggml-large-v3-turbo-q5_0.bin"
-stt_threads = 12
+
+context_injection = "User is talking to you via voice. Expect transcription errors. Correct them automatically and ask for clarification if needed."
 
 pause_threshold = 1.2
 phrase_time_limit = 60.0
@@ -53,6 +59,7 @@ ignore_list = [
   "mm-mm.",
   "bye.",
   "hmm.",
+  "Uh-uh.",
   "you",
   "thank you. thank you.",
   "i don't know.",
@@ -80,5 +87,35 @@ ignore_list = [
   "*mario*",
   "*sad music*",
   "*mimics*",
-  "*snaps*"
+  "*snaps*",
+  "*Cough* *Cough*",
+  "*Clears*",
 ]
+
+[voice.replace_filter]
+'(?:r|R)yan' = 'Orion'
+
+[speak]
+backend = "piper"
+always = false
+with_stt = true
+stop_on_voice = true
+audio_feedback = false
+context_injection = """Your response is streamed to a text-to-speech model. Output short and conversational answers.
+Code blocks and LaTex blocks are filtered out of the spoken answer. Other markdown features are forbidden."""
+
+# applied to a sentence.
+# Supports regex
+[speak.replace_filter]
+asmr = 'A S M R'
+
+# Matches either *text* or **text** or _text_ or __text__, ensuring both sides match exactly
+'(\*{1,2}|\_{1,2})(.*?)\1' = '\2'
+
+'(?:\#)' = ''
+
+[speak.piper]
+model = "/home/luuppi/Documents/coding/python_projects/assistant/models/piper/en_GB-alan-low.onnx"
+config = "/home/luuppi/Documents/coding/python_projects/assistant/models/piper/en_GB-alan-low.onnx.json"
+cuda = false
+pool_size = 4

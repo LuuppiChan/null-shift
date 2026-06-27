@@ -17,6 +17,7 @@ piper-tts
 ChatTTS
 pathvalidate
 flet
+pygame
 
 # tools
 pypdf
