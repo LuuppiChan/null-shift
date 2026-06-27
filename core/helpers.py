@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Optional, Self
 
 import cv2
+import numpy as np
 
 from core.config import manager, tool_manager
 
@@ -93,6 +94,21 @@ def completed(*args: str) -> subprocess.CompletedProcess[str]:
     """
     output = subprocess.run(args, text=True, check=True, capture_output=True)
     return output
+
+
+def compress_image_buffer(base64_str: str, quality: int = 50) -> str:
+    """base64 image buffer."""
+    img_bytes = base64.b64decode(base64_str)
+
+    img_arr = np.frombuffer(img_bytes, dtype=np.uint8)
+    img = cv2.imdecode(img_arr, cv2.IMREAD_COLOR)
+    assert img is not None, "Failed to encode base64 image"
+    success, compressed_img = cv2.imencode(
+        ".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+    )
+    assert success, "Failed to compress base64 image"
+    compressed_b64 = base64.b64encode(compressed_img).decode("utf-8")
+    return compressed_b64
 
 
 def compress_image(image_path: str | Path) -> str:
