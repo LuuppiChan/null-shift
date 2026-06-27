@@ -1,13 +1,15 @@
 import asyncio
 import logging
 import queue
+import re
 import threading
 import time
+import gc
 
 from thefuzz import fuzz, process
 
 from global_tools import Signal
-from gui.config import manager
+from gui.config import GuiConfig, manager
 from gui.stt.listen import MicrophoneListener
 from gui.stt.understand import WhisperSTT
 
@@ -17,12 +19,22 @@ logger = logging.getLogger("Transcriber")
 class Transcriber:
     def __init__(self):
         self.on_input = Signal(str)
-        self.whisper = WhisperSTT()
-        self.mic_listener = MicrophoneListener()
+        self.whisper: WhisperSTT | None = None
+        self.whisper_config = manager.get_config().voice.whisper
+        self.mic_listener: MicrophoneListener = MicrophoneListener()
         self.running = False
         self.transcriber_thread: threading.Thread
         self._result_queue: queue.Queue[str] = queue.Queue()
         self.async_emitter_task: asyncio.Task | None = None
+        manager.config_updated.connect(self.config_changed)
+
+    def config_changed(self, cfg: GuiConfig):
+        if self.whisper_config == cfg.voice.whisper:
+            return
+        self.whisper_config = cfg.voice.whisper
+        del self.whisper
+        gc.collect()
+        self.whisper = WhisperSTT()
 
     async def async_emitter(self):
         """
@@ -36,9 +48,9 @@ class Transcriber:
                 while self.running:
                     try:
                         text = self._result_queue.get_nowait()
-                        logger.info("Got text from queue: %s", text)
+                        logger.debug("Got text from queue: %s", text)
                         self.on_input.emit(text)
-                        logger.info("Emitter: signal emitted")
+                        logger.debug("Emitter: signal emitted")
                     except queue.Empty:
                         await asyncio.sleep(0.1)
             except asyncio.CancelledError:
@@ -51,6 +63,9 @@ class Transcriber:
         self.async_emitter_task = asyncio.create_task(listen())
 
     async def start(self):
+        if self.whisper is None:
+            self.whisper = WhisperSTT()
+
         self.running = True
         self.transcriber_thread = threading.Thread(
             target=self._transcription_worker, daemon=True
@@ -61,9 +76,11 @@ class Transcriber:
 
     async def stop(self):
         self.running = False
-        self.mic_listener.stop()
+        if self.mic_listener is not None:
+            self.mic_listener.stop()
         if self.async_emitter_task is not None:
             self.async_emitter_task.cancel()
+            await self.async_emitter_task
         self.transcriber_thread.join()
 
     def _transcription_worker(self):
@@ -72,6 +89,11 @@ class Transcriber:
             time.sleep(0.1)
 
         while self.running:
+            if self.whisper is None:
+                logger.error("Whisper has not started, cannot run transcriber")
+                self.running = False
+                break
+
             try:
                 # We use a short timeout so we can periodically check `self.running` and clear events
                 try:
@@ -102,9 +124,16 @@ class Transcriber:
                                     match,
                                     score,
                                 )
-                            continue
+                                continue
 
-                        self._result_queue.put(text)
+                        logger.debug("Sending text to queue")
+                        self._result_queue.put(self.apply_filters(text))
 
             except Exception as e:
                 logger.error(f"Transcription worker error: {e}", exc_info=True)
+
+    def apply_filters(self, text: str) -> str:
+        cfg = manager.get_config()
+        for pat, repl in cfg.voice.replace_filter.items():
+            text = re.sub(pat, repl, text)
+        return text

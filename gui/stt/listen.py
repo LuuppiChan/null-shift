@@ -7,17 +7,16 @@ import threading
 import time
 from typing import Any
 
-import speech_recognition as sr
-
 from gui.config import manager
 
 logger = logging.getLogger("Listen")
 vad_logger = logging.getLogger("VAD")
 
+
 class VADMonitor:
     """Raw VAD for speech onset using low-latency parec/pacat."""
 
-    def __init__(self, recognizer: sr.Recognizer, speech_event: threading.Event):
+    def __init__(self, recognizer: "sr.Recognizer", speech_event: threading.Event):
         self.recognizer = recognizer
         self.speech_event = speech_event
         self.running = True
@@ -120,21 +119,39 @@ class MicrophoneListener:
     """Handles SR microphone capturing."""
 
     def __init__(self):
-        self.recognizer = sr.Recognizer()
-        config = manager.get_config()
-        self.recognizer.pause_threshold = config.voice.pause_threshold
-        self.recognizer.non_speaking_duration = config.voice.non_speaking_duration
-        self.microphone = sr.Microphone()
+        import speech_recognition as sr
+
+        self.recognizer: sr.Recognizer | None = None
+        self.microphone: sr.Microphone | None = None
 
         self.audio_queue: queue.Queue[tuple[str, Any]] = queue.Queue()
         self.speech_event = threading.Event()
         self.calibrated = False
 
-        self.vad = VADMonitor(self.recognizer, self.speech_event)
+        self.vad: VADMonitor | None = None
         self.running = True
         self.listen_thread: threading.Thread
 
+    def create_recognizer(self):
+        import speech_recognition as sr
+
+        if self.recognizer is None:
+            self.recognizer = sr.Recognizer()
+            config = manager.get_config()
+            self.recognizer.pause_threshold = config.voice.pause_threshold
+            self.recognizer.non_speaking_duration = config.voice.non_speaking_duration
+
     def start(self):
+        import speech_recognition as sr
+
+        if self.vad is None:
+            self.create_recognizer()
+            assert self.recognizer is not None
+            self.vad = VADMonitor(self.recognizer, self.speech_event)
+
+        if self.microphone is None:
+            self.microphone = sr.Microphone()
+
         self.calibrated = False
         self.running = True
         self.listen_thread = threading.Thread(target=self._listen_loop, daemon=True)
@@ -143,12 +160,19 @@ class MicrophoneListener:
 
     def stop(self):
         self.running = False
+        assert self.vad is not None
         self.vad.stop()
         self.listen_thread.join()
 
     def _listen_loop(self):
-        logger.info("Calibrating for ambient noise...")
+        import speech_recognition as sr
+
+        assert self.microphone is not None
+        assert self.recognizer is not None
+
         with self.microphone as source:
+            self.create_recognizer()
+            logger.info("Calibrating for ambient noise...")
             self.recognizer.adjust_for_ambient_noise(source, duration=1)
             self.calibrated = True
             logger.info("Calibrated. Ready to listen.")

@@ -16,11 +16,11 @@ class WhisperSTT:
     def __init__(self):
         config = manager.get_config()
         logger.info(
-            f"Initializing GGML model {config.voice.stt_model_path} via pywhispercpp..."
+            f"Initializing GGML model {config.voice.whisper.model_path} via pywhispercpp..."
         )
         self.model = WhisperModel(
-            model=config.voice.stt_model_path,
-            n_threads=config.voice.stt_threads,
+            model=config.voice.whisper.model_path,
+            n_threads=config.voice.whisper.threads,
             redirect_whispercpp_logs_to=sys.stdout,
         )
         logger.info("Whisper model initialized.")
