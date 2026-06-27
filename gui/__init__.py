@@ -5,9 +5,11 @@ import asyncio
 import logging
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from typing import Any, Literal
+from copy import deepcopy
 
 import flet as ft
 import zmq.asyncio
@@ -15,6 +17,7 @@ import zmq.asyncio
 from global_tools import Signal
 from global_types import BusMessage, Commands, Difficulty, InputMessage, MessageTopic
 from gui.stt import Transcriber
+from gui.tts import TextToSpeech
 from output_message import OutputMessage
 from gui.config import manager
 
@@ -144,26 +147,50 @@ class Input(ft.Container):
 
         self.voice_text = "Start voice input"
         self.mic = ft.IconButton(
-            ft.Icons.MIC, on_click=self.on_voice_button, tooltip=self.voice_text
+            ft.Icons.MIC,
+            on_click=self.on_voice_button,
+            tooltip=self.voice_text,
+            on_long_press=self.send_long_press,
         )
         self.transcriber = Transcriber()
         self.transcriber.on_input.connect(self.on_voice)
 
         # todo: attach files
         # file selecting, pasting, dragging
-        self.file_button = ft.IconButton(ft.Icons.ADD, tooltip="Attach files")
+        self.file_button = ft.IconButton(
+            ft.Icons.ADD, tooltip="Attach files", on_click=self.open_file_picker
+        )
+        self.file_preview = ft.Row(visible=False)
 
         self.row = ft.Row(
             [
-                # self.file_button,
+                self.file_button,
                 self.input,
                 self.mic,
             ]
         )
-        # add attached files list here
-        self.column = ft.Column([self.row])
+        self.column = ft.Column([self.file_preview, self.row])
         self.content = self.column
         self.on_send: Signal[str, None] = Signal(str)
+        self.chat: Chat
+
+    async def open_file_picker(self):
+        file_picker = ft.FilePicker()
+        files = await file_picker.pick_files("Attach Media")
+        for file in files:
+            if file.path is None:
+                logger.error("Cannot pick file, path is None: %s", file)
+                continue
+
+            path = Path(file.path)
+            # self.file_preview.controls.append()
+
+    async def send_long_press(self):
+        text = self.input.value
+        if text:
+            await self.transcriber.start()
+            self.text_changed()
+            self.update()
 
     async def on_voice_button(self):
         text = self.input.value
@@ -188,17 +215,47 @@ class Input(ft.Container):
             self.mic.icon = ft.Icons.MIC
 
     async def on_voice(self, text: str):
+        logger.debug("Got voice on gui: %s", text)
+        # check for commands
+        cmd = text.lower()
+        if re.search(r"(?:slash|\/)\s?sen(?:d|t)\s?(?:message)?", cmd):
+            self.send()
+            return
+        elif re.search(r"(?:slash|\/)\s?abort", cmd):
+            await self.chat.on_send("/a")
+            cfg = manager.get_config()
+            if cfg.speak.audio_feedback:
+                await self.chat.tts.abort()
+                await self.chat.tts.speak_single("Aborted.")
+            return
+        elif re.search(r"(?:slash|\/)\s?clear", cmd):
+            self.input.value = ""
+            self.update()
+            cfg = manager.get_config()
+            if cfg.speak.audio_feedback:
+                await self.chat.tts.abort()
+                await self.chat.tts.speak_single("Cleared.")
+            return
+        elif re.search(r"(?:slash|\/)\s?current\s?(?:text|message)?", cmd):
+            await self.chat.tts.abort()
+            await self.chat.tts.speak_single("Current message: " + self.input.value)
+            return
+
         self.input.value += "\n" + text if self.input.value else text
         self.update()
         cfg = manager.get_config()
         text = self.input.value.lower()
-        # it's more readable this way
+        # the check is more readable this way
         contains_wake_word = False
         if not cfg.voice.wake_word:
             contains_wake_word = True
-        elif isinstance(cfg.voice.wake_word, str) and cfg.voice.wake_word.lower() in text:
+        elif (
+            isinstance(cfg.voice.wake_word, str) and cfg.voice.wake_word.lower() in text
+        ):
             contains_wake_word = True
-        elif isinstance(cfg.voice.wake_word, list) and any([word.lower() in text for word in cfg.voice.wake_word]):
+        elif isinstance(cfg.voice.wake_word, list) and any(
+            [word.lower() in text for word in cfg.voice.wake_word]
+        ):
             contains_wake_word = True
 
         if cfg.auto_send_voice and contains_wake_word:
@@ -223,7 +280,9 @@ class Message(ft.Container):
         self.bgcolor = ft.Colors.BLACK_54
         self.avatar = ft.Markdown("**Orion**", visible=False)
         self.loading = ft.Column([ft.ProgressRing()])
-        self.space = ft.Divider(height=400, opacity=0, visible=cfg.end_space)
+        self.space = ft.Divider(
+            height=cfg.end_space_height, opacity=0, visible=cfg.end_space
+        )
         self.is_ai: bool = False
         self.is_tool: bool = False
         self.tool_name: str = ""
@@ -246,9 +305,130 @@ class Message(ft.Container):
         )
         self.thought_column = thought_column
 
-        self.content = ft.Column(
-            [self.avatar, self.thoughts, self.text, self.loading, self.space]
+        self.action_bar = ft.Row(
+            [
+                ft.IconButton(
+                    ft.Icons.COPY,
+                    tooltip="Copy to clipboard",
+                    on_click=self.copy_to_clipboard,
+                    icon_size=16,
+                    margin=0,
+                    padding=2,
+                ),
+                copy_thoughts := ft.IconButton(
+                    ft.Icons.COPY_ALL,
+                    tooltip="Copy reasoning to clipboard",
+                    on_click=self.copy_thoughts_to_clipboard,
+                    icon_size=16,
+                    margin=0,
+                    padding=2,
+                    visible=False,
+                ),
+                speak := ft.IconButton(
+                    ft.Icons.VOLUME_UP,
+                    tooltip="Speak aloud",
+                    icon_size=16,
+                    margin=0,
+                    padding=2,
+                    on_click=self.speak_aloud,
+                ),
+                ft.IconButton(
+                    ft.Icons.VISIBILITY_OFF,
+                    tooltip="Hide message",
+                    icon_size=16,
+                    margin=0,
+                    padding=2,
+                    on_click=self.delete_message,
+                ),
+            ],
+            visible=False,
+            tight=True,
         )
+        self.speak_button = speak
+        self.speak_task: asyncio.Task | None = None
+        self.copy_thoughts = copy_thoughts
+
+        self.content = ft.Column(
+            [
+                self.avatar,
+                self.thoughts,
+                self.text,
+                self.action_bar,
+                self.loading,
+                self.space,
+            ]
+        )
+        self.on_hover = self.hover_event
+        self.chat: Chat | None = None
+
+    def delete_message(self):
+        if self.chat is None:
+            logger.error(
+                "Cannot delete message. Hiding instead. Chat is None on message: %s",
+                self.text.value,
+            )
+            self.visible = False
+            self.update()
+            return
+        idx = self.chat.messages.controls.index(self)
+        if idx == -1:
+            logger.error(
+                "Cannot delete message. Hiding instead. Message not found: %s",
+                self.text.value,
+            )
+            self.visible = False
+            self.update()
+            return
+
+        self.chat.messages.controls.pop(idx)
+        logger.info("Removed message: %s", self.text.value)
+        self.chat.messages.update()
+
+    async def speak_aloud(self):
+        if self.chat is None:
+            logger.error(
+                "Cannot speak aloud. Chat reference is None on message: %s",
+                self.text.value,
+            )
+            return
+
+        async def iterator():
+            yield self.text.value
+
+        if self.speak_task is not None and not self.speak_task.done():
+            self.speak_button.icon = ft.Icons.VOLUME_UP
+            await self.chat.tts.abort()
+            self.speak_task.cancel()
+            self.update()
+            return
+
+        def done(_: asyncio.Task):
+            self.speak_task = None
+            self.speak_button.icon = ft.Icons.VOLUME_UP
+            self.update()
+
+        self.speak_button.icon = ft.Icons.STOP
+        await self.chat.tts.stop_stream()
+        await self.chat.tts.abort()
+        self.speak_task = asyncio.create_task(self.chat.tts.speak(iterator()))
+        self.speak_task.add_done_callback(done)
+        self.update()
+
+    def hover_event(self, e: ft.Event[ft.Container]):
+        # is hovering
+        if e.data:
+            self.action_bar.visible = True
+        else:
+            self.action_bar.visible = False
+        self.update()
+
+    async def copy_to_clipboard(self):
+        await ft.Clipboard().set(self.text.value)
+        self.page.show_dialog(ft.SnackBar("Copied answer to clipboard."))
+
+    async def copy_thoughts_to_clipboard(self):
+        await ft.Clipboard().set(self.thought_markdown.value)
+        self.page.show_dialog(ft.SnackBar("Copied reasoning to clipboard."))
 
     def change_size_limit(self):
         if not self.is_tool:
@@ -264,11 +444,22 @@ class Message(ft.Container):
             self.loading.visible = False
             self.text.visible = True
         if thoughts:
+            if not self.thoughts.visible:
+                if self.chat is not None:
+                    cfg = manager.get_config()
+                    if cfg.speak.audio_feedback and self.chat.speaking_enabled():
+                        asyncio.create_task(self.chat.tts.speak_single("Reasoning."))
+                else:
+                    logger.error(
+                        "Cannot speak aloud, chat is None on message: %s",
+                        self.text.value,
+                    )
             self.thought_markdown.value += thoughts
             self.thought_markdown.visible = True
             cfg = manager.get_config()
             self.thoughts.tooltip = self.thought_markdown.value[-cfg.tooltip_len :]
             self.thoughts.visible = True
+            self.copy_thoughts.visible = True
 
     @staticmethod
     def ai(text: str = "", thoughts: str = "") -> "Message":
@@ -324,11 +515,12 @@ class Message(ft.Container):
 class Chat(ft.Container):
     def init(self):
         self.input = Input()
+        self.input.chat = self
         self.input.on_send.connect(self.on_send)
 
-        self.settings = AutoConfig(
-            title="Input message options.\nDon't touch if you don't know what you're doing.",
-            config={
+        self.settings_reference = {
+            "title": "Input message options.\nDon't touch if you don't know what you're doing.",
+            "config": {
                 "type": ConfigValue(
                     value=["", "instant", "batched"],
                     title="Message Type",
@@ -351,12 +543,64 @@ class Chat(ft.Container):
                     value="", title="Context", description="Context about the task."
                 ),
             },
+        }
+        self.settings = AutoConfig(**deepcopy(self.settings_reference))
+        self.preset_map: dict[str, AutoConfig] = {}
+
+        def select_preset(e: ft.Event[ft.Dropdown]):
+            assert isinstance(e.data, str), type(e.data)
+            self.settings = self.preset_map.get(
+                e.data, AutoConfig(**deepcopy(self.settings_reference))
+            )
+
+        def save_preset():
+            if preset_name.value:
+                self.preset_map[preset_name.value] = deepcopy(self.settings)
+                presets.options.append(ft.DropdownOption(preset_name.value))
+                preset_name.value = ""
+                self.update()
+
+        def delete_preset():
+            if presets.value in self.preset_map:
+                del self.preset_map[preset_name.value]
+                preset_name.value = ""
+                for i, preset in enumerate(presets.options):
+                    if preset.text == presets.value:
+                        presets.options.pop(i)
+                        break
+                self.settings = self.preset_map.get(
+                    "", AutoConfig(**deepcopy(self.settings_reference))
+                )
+                self.update()
+            else:
+                logger.warning("Preset %s is not in preset map.", presets.value)
+
+        self.settings_menu = ft.Column(
+            [
+                presets := ft.Dropdown(
+                    "",
+                    [ft.DropdownOption("")],
+                    tooltip="Presets",
+                    on_select=select_preset,
+                    visible=False,
+                ),
+                preset_name := ft.TextField(hint_text="Preset name", visible=False),
+                ft.Row(
+                    [
+                        ft.Button("Save", on_click=save_preset),
+                        ft.Button("Delete", on_click=delete_preset),
+                    ],
+                    visible=False,
+                ),
+                ft.Divider(visible=False),
+                self.settings,
+            ],
             visible=False,
         )
 
         def toggle_visible():
-            self.settings.visible = not self.settings.visible
-            if self.settings.visible:
+            self.settings_menu.visible = not self.settings_menu.visible
+            if self.settings_menu.visible:
                 self.width = 1280
             else:
                 self.width = 1024
@@ -380,7 +624,7 @@ class Chat(ft.Container):
             [self.messages, ft.Column([self.input])],
             expand=True,
         )
-        self.row = ft.Row([self.column, self.settings], expand=True)
+        self.row = ft.Row([self.column, self.settings_menu], expand=True)
         self.stack = ft.Stack([self.row])
         self.content = ft.SelectionArea(self.stack)
         self.align = ft.Alignment.CENTER
@@ -388,12 +632,16 @@ class Chat(ft.Container):
         self.expand = True
 
         self.finished: bool = True
+        self.streaming: bool = False
+        self.tts = TextToSpeech(self.input.transcriber.mic_listener.speech_event)
 
-        # self.add_message(
-        #     Message.user(USER_EXAMPLE),
-        #     Message.ai(AI_EXAMPLE),
-        # )
         self.listening = asyncio.create_task(self.listen())
+        self.config_poller_task = asyncio.create_task(self.config_poller())
+
+    async def config_poller(self):
+        while True:
+            await asyncio.sleep(1)
+            manager.get_config()
 
     async def on_send(self, text: str):
         if text.startswith("/"):
@@ -431,26 +679,63 @@ class Chat(ft.Container):
                                 missing_ok=True
                             )
                             self.messages.controls.clear()
+                            self.page.show_dialog(
+                                ft.SnackBar("History removed and cleared.")
+                            )
                         case _:
                             self.add_message(Message.user(f"Unknown argument '{arg}'"))
                 case _:
                     self.add_message(Message.user(f"Unknown command: '{command}'"))
             self.input.input.value = ""
+            self.input.text_changed()
             self.update()
             return
 
         if self.finished:
+            cfg = manager.get_config()
             self.finished = False
             self.input.input.value = ""
+            self.input.text_changed()
             self.add_message(Message.user(text))
             c = self.settings.config
             options = {k: v.selected for k, v in c.items() if v.selected}
             options["body"] = text
+            context = str(options.get("context", ""))
+
+            if cfg.voice.context_injection and self.input.transcriber.running:
+                context += "\n\n" + cfg.voice.context_injection
+            if cfg.speak.context_injection and (
+                (cfg.speak.with_stt and self.input.transcriber.running)
+                or (cfg.speak.always)
+            ):
+                context += "\n\n" + cfg.speak.context_injection
+
+            options["context"] = context.strip()
+            if not options["context"]:
+                del options["context"]
+
             logger.info("%s", json.dumps(options, indent=2))
+
+            if self.streaming and self.input.transcriber.running:
+                await sock_in.send_multipart(
+                    BusMessage(
+                        topic=MessageTopic.COMMAND,
+                        payload={"command": Commands.ABORT},
+                    ).encoded()
+                )
             self.update()
             await sock_in.send_multipart(
                 InputMessage.model_validate(options).to_bus().encoded()
             )
+            cfg = manager.get_config()
+            if cfg.speak.audio_feedback and self.speaking_enabled():
+                self.tts.put_stream("Message sent.")
+
+    def speaking_enabled(self) -> bool:
+        cfg = manager.get_config()
+        return cfg.speak.always or (
+            cfg.speak.with_stt and self.input.transcriber.running
+        )
 
     async def listen(self):
         """Listen sock_out"""
@@ -474,6 +759,10 @@ class Chat(ft.Container):
                                 continue
 
                             self.append_last(out.text or "", out.reasoning or "")
+                            if out.text:
+                                if self.speaking_enabled():
+                                    self.tts.put_stream(out.text)
+
                         case MessageTopic.TOOL_CALL:
                             out = OutputMessage.from_bus(msg)
                             if out is None:
@@ -487,6 +776,11 @@ class Chat(ft.Container):
                                     out.tool_args or {},
                                 )
                             )
+                            cfg = manager.get_config()
+                            if cfg.speak.audio_feedback:
+                                self.tts.put_stream(
+                                    f"Tool call {str(out.tool_name).replace('_', ' ')}. "
+                                )
                         case MessageTopic.TOOL_RESULT:
                             out = OutputMessage.from_bus(msg)
                             if out is None:
@@ -503,23 +797,43 @@ class Chat(ft.Container):
                             tool.add_tool_response(
                                 out.tool_result or "(No return value)"
                             )
+                            cfg = manager.get_config()
+                            # if cfg.speak.audio_feedback:
+                            #     self.tts.put_stream("Tool result. ")
                         case MessageTopic.STARTED:
                             self.add_message(Message.ai())
+                            if self.speaking_enabled():
+                                await self.tts.start_stream()
+                                cfg = manager.get_config()
+                                if cfg.speak.audio_feedback:
+                                    self.tts.put_stream("Stream started. ")
                         case MessageTopic.FINISHED:
                             self.finished = True
                             self.append_text().loading.visible = False
+                            last = self.append_last()
+                            if last and last.text.value:
+                                cfg = manager.get_config()
+                                if cfg.speak.audio_feedback and self.speaking_enabled():
+                                    self.tts.put_stream("Stream ended. ")
+                            await self.tts.stop_stream()
                         case MessageTopic.ABORT:
                             ai = self.append_last()
                             if ai:
                                 ai.loading.visible = False
                             self.add_message(Message.user("Abort"))
+                            await self.tts.stop_stream()
+                            await self.tts.abort()
+                            cfg = manager.get_config()
+                            if cfg.speak.audio_feedback and self.speaking_enabled():
+                                await self.tts.speak_single("Stream aborted.")
                     self.update()
                 except Exception as e:
-                    logger.error("Error while listening: %s", e)
+                    logger.error("Error while listening: %s", e, exc_info=True)
         except asyncio.CancelledError:
             logger.info("Shutting down listener.")
 
     def add_message(self, message: Message):
+        message.chat = self
         if self.messages.controls:
             assert isinstance(self.messages.controls[-1], Message)
             self.messages.controls[-1].space.visible = False
@@ -530,6 +844,7 @@ class Chat(ft.Container):
         if not self.messages.controls:
             logger.error("Appending to an empty message list!!!")
 
+        logger.debug("Appending text to %s: %s", idx, text or thoughts)
         msg = self.messages.controls[idx]
         assert isinstance(msg, Message)
         msg.append_text(text, thoughts)
@@ -573,7 +888,14 @@ async def main(page: ft.Page):
     sock_out.connect("tcp://localhost:5556")
     sock_out.subscribe(b"")
 
-    logging.basicConfig(level="INFO")
+    logging.basicConfig(
+        level="INFO",
+        format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    # too_verbose = ["flet_transport", "flet_controls", "flet", "flet_desktop"]
+    # for log in too_verbose:
+    #     logging.getLogger(log).setLevel("INFO")
 
     async def on_close(e: ft.WindowEvent):
         if e.type == ft.WindowEventType.CLOSE:
