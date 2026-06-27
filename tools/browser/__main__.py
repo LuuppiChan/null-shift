@@ -255,7 +255,7 @@ class BrowserControl:
                     f"Error: An unexpected internal error occurred: {str(e)}"
                 )
 
-    async def send(self, value: dict[str, Any] | str):
+    async def send(self, value: list[dict[str, Any]] | str):
         if self.sock is None:
             logger.error("Cannot send message, socket is not initialized")
             return

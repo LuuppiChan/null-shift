@@ -2,7 +2,25 @@ import asyncio
 import base64
 from typing import Any
 
+import cv2
+import numpy as np
+
 from playwright.async_api import Page
+
+
+def compress_image_buffer(base64_str: str, quality: int = 50) -> str:
+    """base64 image buffer."""
+    img_bytes = base64.b64decode(base64_str)
+
+    img_arr = np.frombuffer(img_bytes, dtype=np.uint8)
+    img = cv2.imdecode(img_arr, cv2.IMREAD_COLOR)
+    assert img is not None, "Failed to encode base64 image"
+    success, compressed_img = cv2.imencode(
+        ".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+    )
+    assert success, "Failed to compress base64 image"
+    compressed_b64 = base64.b64encode(compressed_img).decode("utf-8")
+    return compressed_b64
 
 
 async def get_agent_dom(page: Page):
@@ -497,31 +515,39 @@ async def set_slider(page: Page, element_id: int, value: str) -> str:
         return f"Error: Failed to set slider {element_id}. Details: {str(e)}"
 
 
-async def take_page_screenshot(page: Page) -> dict[str, Any] | str:
+async def take_page_screenshot(page: Page) -> list[dict[str, Any]] | str:
     """Takes a screenshot of the entire page and returns it as a dict or error string."""
     try:
         screenshot_bytes = await page.screenshot(
             type="jpeg", quality=80, full_page=True
         )
         b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
-        return {
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-        }
+        b64 = compress_image_buffer(b64)
+        return [
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+            }
+        ]
     except Exception as e:
         return f"Error: Failed to take page screenshot. Details: {str(e)}"
 
 
-async def take_element_screenshot(page: Page, element_id: int) -> dict[str, Any] | str:
+async def take_element_screenshot(
+    page: Page, element_id: int
+) -> list[dict[str, Any]] | str:
     """Takes a screenshot of a specific element and returns it as a dict or error string."""
     locator = await _get_locator(page, element_id)
     try:
         screenshot_bytes = await locator.screenshot(type="jpeg", quality=80)
         b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
-        return {
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-        }
+        b64 = compress_image_buffer(b64)
+        return [
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+            }
+        ]
     except Exception as e:
         return f"Error: Failed to take screenshot of element {element_id}. Details: {str(e)}"
 
