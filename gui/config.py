@@ -58,6 +58,7 @@ class GuiConfig(BaseModel):
     tooltip_len: int = 500
     auto_send_voice: bool = False
     send_pdf_bin: bool = False
+    core_history: str = ""
 
     voice: STTConfig = Field(default_factory=STTConfig)
     speak: TTSConfig = Field(default_factory=TTSConfig)

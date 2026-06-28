@@ -21,6 +21,7 @@ class VADMonitor:
         self.speech_event = speech_event
         self.running = True
         self.thread: threading.Thread
+        self.muted = False
 
     def start(self):
         self.thread = threading.Thread(target=self._vad_loop, daemon=True)
@@ -33,6 +34,7 @@ class VADMonitor:
     def _vad_loop(self):
         VAD_CHUNK = 512
         proc = None
+        # TODO: THIS IS LINUX ONLY!
         for cmd, name in [
             (
                 [
@@ -106,7 +108,10 @@ class VADMonitor:
                     )
                     if consecutive_above >= required:
                         vad_logger.info("Onset detected.")
-                        self.speech_event.set()
+                        if self.muted:
+                            vad_logger.debug("No event because is mic muted")
+                        else:
+                            self.speech_event.set()
                         consecutive_above = 0
                 else:
                     consecutive_above = 0
@@ -131,6 +136,18 @@ class MicrophoneListener:
         self.vad: VADMonitor | None = None
         self.running = True
         self.listen_thread: threading.Thread
+        self._muted = False
+
+    @property
+    def muted(self) -> bool:
+        """Whether to mute microphone or not."""
+        return self._muted
+
+    @muted.setter
+    def muted(self, value: bool):
+        self._muted = value
+        if self.vad is not None:
+            self.vad.muted = value
 
     def create_recognizer(self):
         import speech_recognition as sr
@@ -185,6 +202,11 @@ class MicrophoneListener:
                     self.recognizer.non_speaking_duration = (
                         config.voice.non_speaking_duration
                     )
+
+                    if self.muted:
+                        logging.debug("Muted")
+                        time.sleep(0.1)
+                        continue
 
                     audio = self.recognizer.listen(
                         source,

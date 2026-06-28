@@ -4,14 +4,15 @@ end_space_height = 200
 tooltip_len = 500
 auto_send_voice = true
 send_pdf_bin = false
+core_history = "/home/luuppi/.null-shift/brain/history.json"
 
 [voice.whisper]
-model_path = "/home/luuppi/Documents/coding/python_projects/assistant/models/whisper_cpp/ggml-large-v3-turbo-q5_0.bin"
+model_path = "/home/luuppi/Documents/coding/projects/null_shift/models/whisper/en/ggml-large-v3-turbo-q5_0.bin"
 threads = 12
 
 [voice]
 
-context_injection = "User is talking to you via voice. Expect transcription errors. Correct them automatically and ask for clarification if needed."
+context_injection = "User is talking to you via voice. Expect transcription errors. Correct them automatically or ask for clarification if needed."
 
 pause_threshold = 1.2
 phrase_time_limit = 60.0
@@ -67,7 +68,9 @@ ignore_list = [
   "mmm.",
   "mmm. mmm.",
   "mmm. mmm. mmm.",
+  "Mm-mm-mm.",
   "hmm. hmm.",
+  "Um, um.",
   ".",
   "(growls)",
   "(grunting)",
@@ -82,6 +85,7 @@ ignore_list = [
   "(click, click)",
   "(gulps)",
   "*gasp*",
+  "*gurgling*",
   "*gunshot* thank you",
   "*gunshot*",
   "*mario*",
@@ -90,10 +94,11 @@ ignore_list = [
   "*snaps*",
   "*Cough* *Cough*",
   "*Clears*",
+  "*ahem*",
 ]
 
 [voice.replace_filter]
-'(?:r|R)yan' = 'Orion'
+'(?:Ryan|Oran|Aran)' = 'Orion'
 
 [speak]
 backend = "piper"
@@ -115,7 +120,7 @@ asmr = 'A S M R'
 '(?:\#)' = ''
 
 [speak.piper]
-model = "/home/luuppi/Documents/coding/python_projects/assistant/models/piper/en_GB-alan-low.onnx"
-config = "/home/luuppi/Documents/coding/python_projects/assistant/models/piper/en_GB-alan-low.onnx.json"
+model = "/home/luuppi/Documents/coding/projects/null_shift/models/piper/en_GB-alan-low.onnx"
+config = "/home/luuppi/Documents/coding/projects/null_shift/models/piper/en_GB-alan-low.onnx.json"
 cuda = false
 pool_size = 4

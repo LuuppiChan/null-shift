@@ -54,7 +54,7 @@ class TextToSpeech:
         logger.info("Starting tts stream")
         if self.speak_task is not None:
             self.speak_task.cancel()
-            await self.speak_task
+            # await self.speak_task
         while not self.speak_queue.empty():
             self.speak_queue.get_nowait()
 

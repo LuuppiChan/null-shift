@@ -12,6 +12,14 @@ from typing import Any, Literal
 from copy import deepcopy
 
 import flet as ft
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    ToolMessage,
+    messages_from_dict,
+)
+from numpy import isin
 import zmq.asyncio
 
 from global_tools import Signal
@@ -152,6 +160,13 @@ class Input(ft.Container):
             tooltip=self.voice_text,
             on_long_press=self.send_long_press,
         )
+        self.mute = ft.IconButton(
+            icon=ft.Icons.MIC,
+            on_click=self.mute_toggle,
+            tooltip="Mute mic",
+            visible=False,
+        )
+        self.muted = False
         self.transcriber = Transcriber()
         self.transcriber.on_input.connect(self.on_voice)
 
@@ -166,6 +181,7 @@ class Input(ft.Container):
             [
                 self.file_button,
                 self.input,
+                self.mute,
                 self.mic,
             ]
         )
@@ -173,6 +189,16 @@ class Input(ft.Container):
         self.content = self.column
         self.on_send: Signal[str, None] = Signal(str)
         self.chat: Chat
+
+    def mute_toggle(self):
+        self.muted = not self.muted
+        self.transcriber.mic_listener.muted = self.muted
+        if self.muted:
+            self.mute.icon = ft.Icons.MIC_OFF
+            self.mute.tooltip = "Unmute mic"
+        else:
+            self.mute.icon = ft.Icons.MIC
+            self.mute.tooltip = "Mute mic"
 
     async def open_file_picker(self):
         file_picker = ft.FilePicker()
@@ -195,10 +221,12 @@ class Input(ft.Container):
     async def on_voice_button(self):
         text = self.input.value
         if self.transcriber.running:
+            self.mute.visible = False
             await self.transcriber.stop()
         elif text:
             self.send()
         else:
+            self.mute.visible = True
             await self.transcriber.start()
         self.text_changed()
 
@@ -632,11 +660,13 @@ class Chat(ft.Container):
         self.expand = True
 
         self.finished: bool = True
+        self.was_aborted: bool = False
         self.streaming: bool = False
         self.tts = TextToSpeech(self.input.transcriber.mic_listener.speech_event)
 
         self.listening = asyncio.create_task(self.listen())
         self.config_poller_task = asyncio.create_task(self.config_poller())
+        self.load_core_history()
 
     async def config_poller(self):
         while True:
@@ -797,10 +827,11 @@ class Chat(ft.Container):
                             tool.add_tool_response(
                                 out.tool_result or "(No return value)"
                             )
-                            cfg = manager.get_config()
+                            # cfg = manager.get_config()
                             # if cfg.speak.audio_feedback:
                             #     self.tts.put_stream("Tool result. ")
                         case MessageTopic.STARTED:
+                            self.was_aborted = False
                             self.add_message(Message.ai())
                             if self.speaking_enabled():
                                 await self.tts.start_stream()
@@ -816,7 +847,11 @@ class Chat(ft.Container):
                                 if cfg.speak.audio_feedback and self.speaking_enabled():
                                     self.tts.put_stream("Stream ended. ")
                             await self.tts.stop_stream()
+                            if not self.was_aborted:
+                                self.load_core_history()
                         case MessageTopic.ABORT:
+                            self.finished = True
+                            self.was_aborted = True
                             ai = self.append_last()
                             if ai:
                                 ai.loading.visible = False
@@ -878,6 +913,70 @@ class Chat(ft.Container):
         assert isinstance(self.messages.controls[-1], Message)
         return self.messages.controls[-1].is_tool
 
+    # I think this should be the main history generator.
+    def load_core_history(self):
+        cfg = manager.get_config()
+        if not cfg.core_history:
+            return
+
+        history_path = Path(cfg.core_history)
+        if not history_path.is_file():
+            return
+
+        try:
+            self.messages.controls.clear()
+            history_dict: list[dict[str, Any]] = json.loads(history_path.read_text())
+            history = messages_from_dict(history_dict)
+            for msg in history:
+                if isinstance(msg, HumanMessage):
+                    text: str = ""
+                    if isinstance(msg.content, list):
+                        for item in msg.content:
+                            if isinstance(item, str):
+                                text += item
+                            else:
+                                text += str(item.get("text"))
+                    else:
+                        text += msg.content
+                    self.add_message(Message.user(text))
+                elif isinstance(msg, (AIMessageChunk, AIMessage)):
+                    thoughts = ""
+                    text = ""
+                    if isinstance(msg.content, str):
+                        text = msg.content
+                    elif isinstance(msg.content, list):
+                        for chunk in msg.content:
+                            if isinstance(chunk, str):
+                                text += chunk
+                            elif isinstance(chunk, dict):
+                                text += chunk.get("text", "")
+                                thoughts += chunk.get("thoughts", chunk.get("think", chunk.get("reasoning", "")))
+                    thoughts += str(msg.additional_kwargs.get("reasoning", msg.additional_kwargs.get("reasoning_content", "")))
+                    gui_msg = Message.ai(text, thoughts)
+                    gui_msg.loading.visible = False
+                    self.add_message(gui_msg)
+                    for tool_call in msg.tool_calls:
+                        self.add_message(
+                            Message.tool(
+                                tool_call["name"],
+                                str(tool_call["id"]),
+                                tool_call["args"],
+                            )
+                        )
+                elif isinstance(msg, (ToolMessage)):
+                    tool = self.append_last(
+                        type="tool", tool_id=msg.tool_call_id or ""
+                    )
+                    if tool is None:
+                        tool = Message.tool(
+                            msg.name or "", msg.tool_call_id or "", {}
+                        )
+                    tool.add_tool_response(
+                        str(msg.content) or "(No return value)"
+                    )
+        except Exception as e:
+            logger.error("Couldn't load history: %s", e, exc_info=True, stack_info=True)
+
 
 async def main(page: ft.Page):
     global ctx, sock_in, sock_out
@@ -887,6 +986,7 @@ async def main(page: ft.Page):
     sock_in.connect("tcp://localhost:5555")
     sock_out.connect("tcp://localhost:5556")
     sock_out.subscribe(b"")
+    sock_out.setsockopt(zmq.RCVHWM, 10_000)
 
     logging.basicConfig(
         level="INFO",
