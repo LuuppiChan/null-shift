@@ -12,3 +12,4 @@ core_config.toml
 tool_config.toml
 /tools/browser_bad/
 tools.md
+/models/*
