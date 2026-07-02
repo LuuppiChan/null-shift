@@ -3,15 +3,23 @@ import base64
 import logging
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Literal, Optional
 
 import magic
 from langchain_community.document_loaders import PyPDFLoader
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 
 from core.config import manager, tool_manager
-from core.helpers import compress_audio, compress_image, compress_video, get_permission
+from core.helpers import (
+    ask_ai,
+    compress_audio,
+    compress_image,
+    compress_video,
+    get_permission,
+)
 from core.helpers import enforce_character_limit as _enforce_character_limit
 from global_types import run_killable
 
@@ -119,13 +127,13 @@ def _validate_and_resolve_path(
     return str(Path(file_path).expanduser().resolve()), None
 
 
-@tool
-def file_read(
+def _file_read(
     file_path: str | Artifacts,
     start_line: Optional[int | float] = None,
     end_line: Optional[int | float] = None,
     character_limit: int | None = None,
     show_line_numbers: bool = False,
+    text_only: bool = False,
 ) -> str | list[str | dict[str, str]]:
     """
     Primary file reading tool.
@@ -176,6 +184,7 @@ def file_read(
         cfg = tool_manager.get_config()
         character_limit = cfg.file_absurd_size_limit
 
+    is_text = False
     if mime.startswith("image/"):
         content_list.append(
             {
@@ -281,6 +290,7 @@ def file_read(
                 {"text": _enforce_character_limit("\n".join(text), character_limit)}
             )
     else:
+        is_text = True
         # if mime.startswith("text/") or any([mime.startswith(t) for t in SAFE_APP_TYPES]):
         if show_line_numbers:
             lines = [
@@ -299,12 +309,119 @@ def file_read(
             {"text": _enforce_character_limit("\n".join(text), character_limit)}
         )
 
+    if text_only and not is_text:
+        return "Error: Input file is not text only."
+
     if len(content_list) == 1 and "text" in content_list[0]:
         return content_list[0]["text"]
     return content_list
 
 
-@tool
+@tool(
+    description="""Primary file reading tool.
+Reads files with line-range support.
+Handles both text and binary files, with automatic encoding detection.
+Respects permission boundaries.
+Start and end lines are seconds when reading videos or audio.
+
+Supported file types includes, but is not limited to
+- text
+- image
+- video
+- pdf
+- audio
+
+start and end lines are supported on
+- text
+- video
+- pdf (if pdf returns only text)
+- audio
+
+Args:
+    file_path: Absolute path to the file or an artifact name.
+    start_line: Optional line to start the read at. Starts at the first line if not specified. (1-indexed)
+    end_line: Optional line to end the read at. Reads to the end if not specified. (exclusive)
+    character_limit: Max character limit. None means default max character limit.
+    show_line_numbers: Show line numbers when reading text."""
+)
+def file_read(
+    file_path: str | Artifacts,
+    start_line: Optional[int | float] = None,
+    end_line: Optional[int | float] = None,
+    character_limit: int | None = None,
+    show_line_numbers: bool = False,
+) -> str | list[str | dict[str, str]]:
+    return _file_read(
+        file_path, start_line, end_line, character_limit, show_line_numbers
+    )
+
+
+@tool(
+    description="""Return an AI summary of the given file.
+**Text file only!**
+An economical convenience tool to prevent token wasting.
+Internally just feeds the text file and the `message` parameter to an AI model.
+You can ask any question about the file."""
+)
+def file_summary(
+    file_path: str | Artifacts,
+    start_line: Optional[int | float] = None,
+    end_line: Optional[int | float] = None,
+    character_limit: int | None = None,
+    show_line_numbers: bool = False,
+    message: str = "Summarize the contents of this file.",
+) -> str:
+    return asyncio.run(
+        ask_ai(
+            message,
+            f"""You are a file summary assistant in an agent system.
+The "user" you're talking to is the main agent.
+Your task is to summarize and answer the agent's questions about the file.
+Do note that the file input given may be an error, in this case just inform the agent.
+You're given an input from a read_file tool with the following parameters:
+```
+{file_path=}
+{start_line=}
+{end_line=}
+{character_limit=}
+{show_line_numbers=}
+```
+The input might differ from the original file input.
+If you need more context for the question ask the agent to see a different part of the file.
+""",
+            "low",
+            [
+                HumanMessage(
+                    str(
+                        _file_read(
+                            file_path,
+                            start_line,
+                            end_line,
+                            character_limit,
+                            show_line_numbers,
+                            text_only=True,
+                        )
+                    )
+                ),
+                AIMessage("Page content acknowledged"),
+            ],
+        )
+    )
+
+
+@tool(
+    description="""Make targeted edits to existing files using search and replace.
+Uses exact string matching to locate edit targets.
+Args:
+    file_path: Absolute path to the file or an artifact name.
+    target_content: The exact string to be replaced (including whitespace).
+    replacement_content: The new text to insert.
+    start_line: Start of the search range (1-indexed).
+    end_line: End of the search range (inclusive).
+    allow_multiple: If True, replaces all occurrences in range. If False, errors if multiple found.
+Returns:
+    str: Confirmation or error details."""
+)
 def file_edit(
     file_path: str | Artifacts,
     target_content: str,
@@ -313,19 +430,6 @@ def file_edit(
     end_line: int,
     allow_multiple: bool = False,
 ) -> str:
-    """
-    Make targeted edits to existing files using search and replace.
-    Uses exact string matching to locate edit targets.
-    Args:
-        file_path: Absolute path to the file or an artifact name.
-        target_content: The exact string to be replaced (including whitespace).
-        replacement_content: The new text to insert.
-        start_line: Start of the search range (1-indexed).
-        end_line: End of the search range (inclusive).
-        allow_multiple: If True, replaces all occurrences in range. If False, errors if multiple found.
-    Returns:
-        str: Confirmation or error details.
-    """
     resolved_path, err = _validate_and_resolve_path(file_path, "edit")
     if err:
         return err
@@ -370,18 +474,17 @@ def file_edit(
         return _enforce_character_limit(f"Error editing file: {e}")
 
 
-@tool
+@tool(
+    description="""Writes or appends content to a file.
+Also can be used to delete files and directories by giving a path to them and writing an empty string.
+Args:
+    file_path: Absolute path to the file or an artifact name.
+    content: The text to write. An empty string means to delete the file.
+    overwrite: If True, replaces content. If False, appends."""
+)
 def file_write(
     file_path: str | Artifacts, content: str, overwrite: bool = False
 ) -> str:
-    """
-    Writes or appends content to a file.
-    Also can be used to delete files and directories by giving a path to them and writing an empty string.
-    Args:
-        file_path: Absolute path to the file or an artifact name.
-        content: The text to write. An empty string means to delete the file.
-        overwrite: If True, replaces content. If False, appends.
-    """
     resolved_path, err = _validate_and_resolve_path(file_path, "edit")
     if err:
         return err
@@ -411,19 +514,18 @@ def file_write(
         return _enforce_character_limit(f"Error writing to file: {e}")
 
 
-@tool
+@tool(
+    description="""Find files matching a glob pattern across the system.
+Searches the workspace using glob patterns (e.g., ~/some/project/**/*.md).
+
+Args:
+    pattern: Glob pattern
+    file_path: Absolute path to the directory to start the glob search from, or an artifact name.
+    case_sensitive: Whether the globbing is case sensitive or not."""
+)
 def file_glob(
     pattern: str, file_path: str | Artifacts, case_sensitive: bool = False
 ) -> str:
-    """
-    Find files matching a glob pattern across the system.
-    Searches the workspace using glob patterns (e.g., ~/some/project/**/*.md).
-
-    Args:
-        pattern: Glob pattern
-        file_path: Absolute path to the directory to start the glob search from, or an artifact name.
-        case_sensitive: Whether the globbing is case sensitive or not.
-    """
     resolved_path, err = _validate_and_resolve_path(file_path, "read")
     if err:
         return err
@@ -466,7 +568,19 @@ def file_glob(
         return _enforce_character_limit(f"Error globbing files: {e}")
 
 
-@tool
+@tool(
+    description="""Search file contents using regular expressions.
+Performs regex search across files in the workspace.
+Returns matching lines with file paths and line numbers.
+Supports case-insensitive and include/exclude patterns.
+
+Args:
+    pattern: Regex pattern to search for within file contents.
+    file_path: Absolute path to the directory to start the grep search from, or an artifact name.
+    include: Optional glob pattern to include files (e.g., "*.py", "**/*.js"). If not specified, all files are considered.
+    exclude: Optional glob pattern to exclude files. Exclude takes precedence over include.
+    ignore_case: If true, the search will be case-insensitive."""
+)
 def file_grep(
     pattern: str,
     file_path: str | Artifacts,
@@ -474,19 +588,6 @@ def file_grep(
     exclude: Optional[str] = None,
     ignore_case: bool = False,
 ) -> str:
-    """
-    Search file contents using regular expressions.
-    Performs regex search across files in the workspace.
-    Returns matching lines with file paths and line numbers.
-    Supports case-insensitive and include/exclude patterns.
-
-    Args:
-        pattern: Regex pattern to search for within file contents.
-        file_path: Absolute path to the directory to start the grep search from, or an artifact name.
-        include: Optional glob pattern to include files (e.g., "*.py", "**/*.js"). If not specified, all files are considered.
-        exclude: Optional glob pattern to exclude files. Exclude takes precedence over include.
-        ignore_case: If true, the search will be case-insensitive.
-    """
     resolved_path, err = _validate_and_resolve_path(file_path, "read")
     if err:
         return err
@@ -563,23 +664,21 @@ def file_grep(
     return _enforce_character_limit("\n".join(found_matches))
 
 
-@tool
+@tool(
+    description="""Lists the files and subdirectories within a given path, optionally with depth control and pattern filtering.
+
+Args:
+    directory_path: The absolute path to the directory or an artifact name.
+    depth: The maximum depth of subdirectories to traverse. Defaults to 1 (only immediate children).
+           Set to 0 or a negative number to disable depth limit.
+    pattern: Optional glob pattern to filter files and directories (e.g., "*.py", "docs/*").
+
+Returns:
+    str: A formatted list of directory contents."""
+)
 def file_directory_contents(
     directory_path: str | Artifacts, depth: int = 1, pattern: Optional[str] = None
 ) -> str:
-    """
-    Lists the files and subdirectories within a given path, optionally with depth control and pattern filtering.
-
-    Args:
-        directory_path: The absolute path to the directory or an artifact name.
-        depth: The maximum depth of subdirectories to traverse. Defaults to 1 (only immediate children).
-               Set to 0 or a negative number to disable depth limit.
-        pattern: Optional glob pattern to filter files and directories (e.g., "*.py", "docs/*").
-
-    Returns:
-        str: A formatted list of directory contents.
-    """
-
     resolved_path, err = _validate_and_resolve_path(directory_path, "read")
     if err:
         return err
@@ -647,3 +746,57 @@ def file_directory_contents(
         return _enforce_character_limit(
             f"Error listing directory '{directory_path}': {e}"
         )
+
+
+# Make this to support scratchpad instead of hard-coded desktop
+def _is_in_desktop(target_path: Path) -> bool:
+    """
+    A separate check to verify if the given path is located
+    somewhere inside the current Linux user's Desktop directory.
+    """
+    desktop_dir = (Path.home() / "Desktop").resolve()
+
+    # .is_relative_to() checks if a path is a child of another path (Requires Python 3.9+)
+    return target_path.is_relative_to(desktop_dir)
+
+
+@tool(
+    description="""Uncompresses a file to a target path.
+Currently only Desktop file paths are allowed.
+Fails if target path exists.
+
+Args:
+    input_path: Absolute path to the compressed archive (e.g., .zip, .tar.gz).
+    target_path: Destination path where contents will be extracted.
+    format: The archive format: one of "zip", "tar", "gztar", "bztar", or "xztar".  Or any other registered format.  If not provided, unpack_archive will use the filename extension and see if an unpacker was registered for that extension."""
+)
+def decompress_file(input_path: str, target_path: str, format: str | None = None) -> str:
+    # 1. Expand user (e.g., '~') and resolve to an absolute path for the input
+    resolved_input = Path(input_path).expanduser().resolve()
+
+    if not resolved_input.is_file():
+        raise FileNotFoundError(
+            f"The input compressed file was not found: {resolved_input}"
+        )
+
+    # Prepare the target path
+    resolved_target = Path(target_path).expanduser().resolve()
+
+    # 2. Check if the target path already exists; error out if it does
+    if resolved_target.exists():
+        raise FileExistsError(
+            f"Target path '{resolved_target}' already exists. Aborting operation."
+        )
+
+    # 3. Perform the separate check to ensure the target is inside the Desktop
+    if not _is_in_desktop(resolved_target):
+        raise PermissionError(
+            f"Target path '{resolved_target}' is not within the current user's Desktop directory."
+        )
+
+    # 4. Uncompress the file
+    # shutil.unpack_archive creates the target directory and extracts contents automatically
+    shutil.unpack_archive(str(resolved_input), str(resolved_target), format=format)
+
+    # 5. Return a string stating what was done
+    return f"Success: Uncompressed '{resolved_input.name}' into the directory '{resolved_target}'."

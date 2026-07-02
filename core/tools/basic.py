@@ -6,35 +6,33 @@ from langchain_core.tools import tool
 logger = logging.getLogger(__name__)
 
 
-@tool
-def sleep(seconds: float) -> str:
-    """
-    Blocks execution for the given amount of time before returning.
-    Good for waiting for concurrent processes to finish.
+@tool(
+    description="""Blocks execution for the given amount of time before returning.
+Good for waiting for concurrent processes to finish.
 
-    # Example
-    You have a compilation process you are running on background.
-    ```
-    [Start compilation]
-    sleep(10)
-    [Check if it's done]
-    # continue sleeping or doing something else if not done.
-    sleep(10)
-    ...
-    ```
-    """
+# Example
+You have a compilation process you are running on background.
+```
+[Start compilation]
+sleep(10)
+[Check if it's done]
+# continue sleeping or doing something else if not done.
+sleep(10)
+...
+```"""
+)
+def sleep(seconds: float) -> str:
     logger.info("Sleeping for %s second(s)", seconds)
     _sleep(seconds)
     logger.info("Done sleeping")
     return f"Slept for {seconds} second(s)."
 
 
-@tool
+@tool(
+    description="""Preforms a simple web search and returns a summary of the top search results.
+Use this for retrieving simple real-time information."""
+)
 def web_search(query: str) -> str:
-    """
-    Preforms a simple web search and returns a summary of the top search results.
-    Use this for retrieving simple real-time information.
-    """
     from ddgs.ddgs import DDGS
 
     try:
