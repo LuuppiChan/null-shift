@@ -138,6 +138,9 @@ class TaskModels(BaseModel):
     task_infer: ModelIdentifier = None
     history_summary: ModelIdentifier = None
     message_summary: ModelIdentifier = None
+    high: ModelIdentifier = None
+    medium: ModelIdentifier = None
+    low: ModelIdentifier = None
 
 
 class LLM(BaseModel):

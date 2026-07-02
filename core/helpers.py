@@ -1,15 +1,125 @@
+import asyncio
 import base64
 import json
 import logging
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Optional, Self
+from typing import Any, Literal, Optional, Self, cast, overload
 
 import cv2
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    BaseMessageChunk,
+    HumanMessage,
+    SystemMessage,
+)
 import numpy as np
 
+from core.backends import get_backend
 from core.config import manager, tool_manager
+from core.registry import LLMTool
+
+
+@overload
+async def ask_ai(
+    message: HumanMessage,
+    system: str = "",
+    model_level: Literal["high", "medium", "low"] = "medium",
+    history: list[BaseMessage] | None = None,
+    tools: list[LLMTool] | None = None,
+) -> AIMessage: ...
+
+
+@overload
+async def ask_ai(
+    message: str,
+    system: str = "",
+    model_level: Literal["high", "medium", "low"] = "medium",
+    history: list[BaseMessage] | None = None,
+    tools: list[LLMTool] | None = None,
+) -> str: ...
+
+
+async def ask_ai(
+    message: str | HumanMessage,
+    system: str = "",
+    model_level: Literal["high", "medium", "low"] = "medium",
+    history: list[BaseMessage] | None = None,
+    tools: list[LLMTool] | None = None,
+) -> str | AIMessage:
+    """
+    Temporary query to an AI.
+    Args:
+        message: User message to the AI
+        system: System prompt for the conversation
+        model_level: Model level to use
+        history: If you want to have a multi message history use this. It assumes correct structure. The system message is appended to the first position and the human message is appended to the end.
+
+    Raises:
+        Whatever langchain raises when it fails.
+
+    History state:
+    History state is unchanged
+    """
+    logger = logging.getLogger("ask_ai")
+
+    cfg = manager.get_config()
+    level = cfg.llm.models.main
+    match model_level:
+        case "high":
+            level = cfg.llm.models.high
+        case "medium":
+            level = cfg.llm.models.medium
+        case "low":
+            level = cfg.llm.models.low
+
+    model = cfg.get_model(level)
+    system_message = []
+    if system:
+        system_message = [SystemMessage(system)]
+
+    if isinstance(message, HumanMessage):
+        human = message
+    else:
+        human = HumanMessage(message)
+
+    messages = system_message + (history or []) + [human]
+    llm = get_backend(model)
+    response = llm.stream(messages, tools)
+    full: AIMessage | None = None
+    error: Exception | None = None
+    for _ in range(3):
+        try:
+            async for chunk in response:
+                full = chunk if full is None else cast(AIMessage, full + chunk)
+        except Exception as e:
+            error = e
+            full = None
+            logger.error("Error while getting answer: %s", e, exc_info=True)
+
+    if full is None:
+        logger.error("AI failed to respond.")
+        return "AI failed to respond: %s" % error
+
+    res = ""
+    if isinstance(full.content, str):
+        res += full.content
+    elif isinstance(full.content, list):
+        for item in full.content:
+            if isinstance(item, str):
+                res += item
+            elif isinstance(item, dict):
+                res += str(item.get("text", ""))
+
+    if not res:
+        logger.error("AI returned an empty response.")
+
+    if isinstance(message, str):
+        return res
+    else:
+        return full
 
 
 class PromptHelper:
