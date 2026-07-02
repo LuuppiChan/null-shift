@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 from copy import deepcopy
 
 import flet as ft
@@ -19,7 +19,6 @@ from langchain_core.messages import (
     ToolMessage,
     messages_from_dict,
 )
-from numpy import isin
 import zmq.asyncio
 
 from global_tools import Signal
@@ -215,6 +214,8 @@ class Input(ft.Container):
         text = self.input.value
         if text:
             await self.transcriber.start()
+            await self.chat.tts.start_stream()
+            self.mute.visible = True
             self.text_changed()
             self.update()
 
@@ -228,6 +229,7 @@ class Input(ft.Container):
         else:
             self.mute.visible = True
             await self.transcriber.start()
+            await self.chat.tts.start_stream()
         self.text_changed()
 
     def text_changed(self):
@@ -277,9 +279,16 @@ class Input(ft.Container):
         contains_wake_word = False
         if not cfg.voice.wake_word:
             contains_wake_word = True
-        elif (
-            isinstance(cfg.voice.wake_word, str) and cfg.voice.wake_word.lower() in text
-        ):
+        elif isinstance(cfg.voice.wake_word, str):
+            contains_wake_word = re.search(cfg.voice.wake_word, text) is not None
+        elif isinstance(cfg.voice.wake_word, list):
+            for wake_word in cfg.voice.wake_word:
+                match = re.search(wake_word, text)
+                if match:
+                    contains_wake_word = True
+                    break
+
+        if isinstance(cfg.voice.wake_word, str) and cfg.voice.wake_word.lower() in text:
             contains_wake_word = True
         elif isinstance(cfg.voice.wake_word, list) and any(
             [word.lower() in text for word in cfg.voice.wake_word]
@@ -420,9 +429,6 @@ class Message(ft.Container):
             )
             return
 
-        async def iterator():
-            yield self.text.value
-
         if self.speak_task is not None and not self.speak_task.done():
             self.speak_button.icon = ft.Icons.VOLUME_UP
             await self.chat.tts.abort()
@@ -436,9 +442,9 @@ class Message(ft.Container):
             self.update()
 
         self.speak_button.icon = ft.Icons.STOP
-        await self.chat.tts.stop_stream()
-        await self.chat.tts.abort()
-        self.speak_task = asyncio.create_task(self.chat.tts.speak(iterator()))
+        self.speak_task = asyncio.create_task(
+            self.chat.tts.speak_single(self.text.value)
+        )
         self.speak_task.add_done_callback(done)
         self.update()
 
@@ -476,7 +482,7 @@ class Message(ft.Container):
                 if self.chat is not None:
                     cfg = manager.get_config()
                     if cfg.speak.audio_feedback and self.chat.speaking_enabled():
-                        asyncio.create_task(self.chat.tts.speak_single("Reasoning."))
+                        self.chat.tts.put_stream("Reasoning. ")
                 else:
                     logger.error(
                         "Cannot speak aloud, chat is None on message: %s",
@@ -490,8 +496,11 @@ class Message(ft.Container):
             self.copy_thoughts.visible = True
 
     @staticmethod
-    def ai(text: str = "", thoughts: str = "") -> "Message":
+    def ai(
+        text: str = "", thoughts: str = "", chat: Optional["Chat"] = None
+    ) -> "Message":
         msg = Message()
+        msg.chat = chat
         msg.append_text(text, thoughts)
         msg.align = ft.Alignment.CENTER_LEFT
         msg.bgcolor = None
@@ -759,7 +768,7 @@ class Chat(ft.Container):
             )
             cfg = manager.get_config()
             if cfg.speak.audio_feedback and self.speaking_enabled():
-                self.tts.put_stream("Message sent.")
+                self.tts.put_stream("Message sent. ")
 
     def speaking_enabled(self) -> bool:
         cfg = manager.get_config()
@@ -781,7 +790,7 @@ class Chat(ft.Container):
                     match msg.topic:
                         case MessageTopic.STREAM:
                             if self.is_last_tool():
-                                self.add_message(Message.ai())
+                                self.add_message(Message.ai(chat=self))
 
                             out = OutputMessage.from_bus(msg)
                             if out is None:
@@ -832,7 +841,7 @@ class Chat(ft.Container):
                             #     self.tts.put_stream("Tool result. ")
                         case MessageTopic.STARTED:
                             self.was_aborted = False
-                            self.add_message(Message.ai())
+                            self.add_message(Message.ai(chat=self))
                             if self.speaking_enabled():
                                 await self.tts.start_stream()
                                 cfg = manager.get_config()
@@ -845,7 +854,7 @@ class Chat(ft.Container):
                             if last and last.text.value:
                                 cfg = manager.get_config()
                                 if cfg.speak.audio_feedback and self.speaking_enabled():
-                                    self.tts.put_stream("Stream ended. ")
+                                    self.tts.put_stream(" Stream ended. ")
                             await self.tts.stop_stream()
                             if not self.was_aborted:
                                 self.load_core_history()
@@ -950,9 +959,17 @@ class Chat(ft.Container):
                                 text += chunk
                             elif isinstance(chunk, dict):
                                 text += chunk.get("text", "")
-                                thoughts += chunk.get("thoughts", chunk.get("think", chunk.get("reasoning", "")))
-                    thoughts += str(msg.additional_kwargs.get("reasoning", msg.additional_kwargs.get("reasoning_content", "")))
-                    gui_msg = Message.ai(text, thoughts)
+                                thoughts += chunk.get(
+                                    "thoughts",
+                                    chunk.get("think", chunk.get("reasoning", "")),
+                                )
+                    thoughts += str(
+                        msg.additional_kwargs.get(
+                            "reasoning",
+                            msg.additional_kwargs.get("reasoning_content", ""),
+                        )
+                    )
+                    gui_msg = Message.ai(text, thoughts, chat=self)
                     gui_msg.loading.visible = False
                     self.add_message(gui_msg)
                     for tool_call in msg.tool_calls:
@@ -964,16 +981,10 @@ class Chat(ft.Container):
                             )
                         )
                 elif isinstance(msg, (ToolMessage)):
-                    tool = self.append_last(
-                        type="tool", tool_id=msg.tool_call_id or ""
-                    )
+                    tool = self.append_last(type="tool", tool_id=msg.tool_call_id or "")
                     if tool is None:
-                        tool = Message.tool(
-                            msg.name or "", msg.tool_call_id or "", {}
-                        )
-                    tool.add_tool_response(
-                        str(msg.content) or "(No return value)"
-                    )
+                        tool = Message.tool(msg.name or "", msg.tool_call_id or "", {})
+                    tool.add_tool_response(str(msg.content) or "(No return value)")
         except Exception as e:
             logger.error("Couldn't load history: %s", e, exc_info=True, stack_info=True)
 

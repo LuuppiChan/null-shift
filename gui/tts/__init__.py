@@ -23,6 +23,7 @@ class TextToSpeech:
         self.speaking = False
         self.audio_playback = False
         self.speech_event = speech_event
+        self.running = False
 
         self.speak_queue: asyncio.Queue[str | None] = asyncio.Queue()
         self.speak_task: asyncio.Task | None = None
@@ -52,6 +53,11 @@ class TextToSpeech:
     async def start_stream(self):
         """Start internal speaking stream."""
         logger.info("Starting tts stream")
+        if self.running:
+            logger.warning("Stream already running.")
+            return
+
+        self.running = True
         if self.speak_task is not None:
             self.speak_task.cancel()
             # await self.speak_task
@@ -73,6 +79,7 @@ class TextToSpeech:
     async def stop_stream(self):
         """Stop internal speaking stream."""
         logger.info("Stopping tts stream gracefully")
+        self.running = False
         if self.speak_task is not None and not self.speak_task.done():
             await self.speak_queue.put(None)
 
@@ -80,9 +87,10 @@ class TextToSpeech:
         """Stop speaking."""
         logger.info("Aborting speech")
         self.speaking = False
+        self.running = False
         if self.speak_task is not None:
             self.speak_task.cancel()
-            await self.speak_task
+            # await self.speak_task
 
     def _set_backend(self):
         """
@@ -164,6 +172,11 @@ class TextToSpeech:
     async def speak_single(self, text: str):
         """Speaks only this text. Then returns."""
 
+        was_speaking = self.running
+        if was_speaking:
+            await self.abort()
+            await self.stop_stream()
+
         async def iter():
             yield text
 
@@ -186,6 +199,8 @@ class TextToSpeech:
         finally:
             pygame.mixer.quit()
             self.speaking = False
+            if was_speaking:
+                await self.start_stream()
 
     async def _speak(self, file: AudioFile):
         import pygame

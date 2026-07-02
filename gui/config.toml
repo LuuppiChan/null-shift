@@ -18,8 +18,8 @@ pause_threshold = 1.2
 phrase_time_limit = 60.0
 non_speaking_duration = 1.2
 
-tts_vad_sensitivity = 5.0
-tts_vad_consecutive_chunks = 3
+tts_vad_sensitivity = 5.5
+tts_vad_consecutive_chunks = 4
 
 wake_word = ["orion", "computer", "tietokone"]
 
@@ -98,7 +98,7 @@ ignore_list = [
 ]
 
 [voice.replace_filter]
-'(?:Ryan|Oran|Aran)' = 'Orion'
+'(?:Ryan|Oran|Aran|Brian)' = 'Orion'
 
 [speak]
 backend = "piper"
