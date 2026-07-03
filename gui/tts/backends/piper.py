@@ -2,6 +2,7 @@ import gc
 import io
 import logging
 import queue
+from typing import TYPE_CHECKING
 import wave
 
 
@@ -13,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 class PiperTTSBackend(BaseTTSBackend):
     def __init__(self) -> None:
-        import piper
+        if TYPE_CHECKING:
+            import piper
 
         cfg = manager.get_config()
         self.config = cfg.speak.piper
