@@ -5,7 +5,6 @@ Functions for easier interaction with the core.
 import logging
 from typing import AsyncGenerator, AsyncIterator, cast
 import zmq.asyncio
-from core.config import manager
 from global_types import BusMessage, InputMessage, MessageTopic
 from output_message import OutputMessage
 
@@ -17,14 +16,17 @@ class CoreStream:
     Listen to the core and send messages to the core.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        sock_in_addr: str = "127.0.0.1:5555",
+        sock_out_addr: str = "127.0.0.1:5556",
+    ) -> None:
         ctx = zmq.asyncio.Context()
-        cfg = manager.get_config()
         self.ctx = ctx
         self.sock_in = ctx.socket(zmq.PUSH)
-        self.sock_in.bind(cfg.socket.input)
+        self.sock_in.bind(sock_in_addr)
         self.sock_out = ctx.socket(zmq.SUB)
-        self.sock_out.bind(cfg.socket.output)
+        self.sock_out.bind(sock_out_addr)
 
     def __aiter__(self) -> AsyncIterator[BusMessage]:
         return self

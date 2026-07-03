@@ -29,7 +29,7 @@ def send_browser_request(_action: str, **kwargs: Any) -> Any:
 
     # The browser server binds to e.g., tcp://*:5557, but the client must connect to localhost
     # address = config.socket_path.replace("*", "localhost")
-    address = "tcp://localhost:5557"
+    address = "tcp://127.0.0.1:5557"
 
     socket = _zmq_ctx.socket(zmq.REQ)
     socket.setsockopt(zmq.RCVTIMEO, 400)

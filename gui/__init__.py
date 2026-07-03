@@ -1002,6 +1002,7 @@ async def main(page: ft.Page):
     sock_out.connect("tcp://127.0.0.1:5556")
     sock_out.subscribe(b"")
     sock_out.setsockopt(zmq.RCVHWM, 10_000)
+    sock_in.setsockopt(zmq.RCVTIMEO, 10_000)
 
     logging.basicConfig(
         level="INFO",

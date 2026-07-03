@@ -7,7 +7,7 @@ from global_tools import ConfigManager
 class BrowserConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    socket_path: str = "tcp://*:5557"
+    socket_path: str = "tcp://127.0.0.1:5557"
 
 
 manager = ConfigManager(Path("./browser_config.toml"), BrowserConfig())
