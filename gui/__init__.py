@@ -702,21 +702,25 @@ class Chat(ft.Container):
                 case "/h" | "/history":
                     match arg:
                         case "mv":
-                            Path("~/.null-shift/brain/history.json").expanduser().rename(
-                                Path(f"~/.null-shift/brain/history {datetime.now().strftime('%d-%m-%y %H-%M-%S')}.json").expanduser()
+                            Path(
+                                "~/.null-shift/brain/history.json"
+                            ).expanduser().rename(
+                                Path(
+                                    f"~/.null-shift/brain/history {datetime.now().strftime('%d-%m-%y %H-%M-%S')}.json"
+                                ).expanduser()
                             )
                             self.add_message(Message.user("History moved."))
                         case "rm":
-                            Path("~/.null-shift/brain/history.json").expanduser().unlink(
-                                missing_ok=True
-                            )
+                            Path(
+                                "~/.null-shift/brain/history.json"
+                            ).expanduser().unlink(missing_ok=True)
                             self.add_message(Message.user("History deleted."))
                         case "c":
                             self.messages.controls.clear()
                         case "crm" | "rmc" | "rm c" | "c rm":
-                            Path("~/.null-shift/brain/history.json").expanduser().unlink(
-                                missing_ok=True
-                            )
+                            Path(
+                                "~/.null-shift/brain/history.json"
+                            ).expanduser().unlink(missing_ok=True)
                             self.messages.controls.clear()
                             self.page.show_dialog(
                                 ft.SnackBar("History removed and cleared.")
