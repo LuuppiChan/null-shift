@@ -998,8 +998,8 @@ async def main(page: ft.Page):
     ctx = zmq.asyncio.Context()
     sock_in = ctx.socket(zmq.PUSH)
     sock_out = ctx.socket(zmq.SUB)
-    sock_in.connect("tcp://localhost:5555")
-    sock_out.connect("tcp://localhost:5556")
+    sock_in.connect("tcp://127.0.0.1:5555")
+    sock_out.connect("tcp://127.0.0.1:5556")
     sock_out.subscribe(b"")
     sock_out.setsockopt(zmq.RCVHWM, 10_000)
 
