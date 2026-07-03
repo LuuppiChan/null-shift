@@ -702,19 +702,19 @@ class Chat(ft.Container):
                 case "/h" | "/history":
                     match arg:
                         case "mv":
-                            Path("/home/luuppi/.null-shift/brain/history.json").rename(
-                                f"/home/luuppi/.null-shift/brain/history {datetime.now().strftime('%d-%m-%y %H-%M-%S')}.json"
+                            Path("~/.null-shift/brain/history.json").expanduser().rename(
+                                Path(f"~/.null-shift/brain/history {datetime.now().strftime('%d-%m-%y %H-%M-%S')}.json").expanduser()
                             )
                             self.add_message(Message.user("History moved."))
                         case "rm":
-                            Path("/home/luuppi/.null-shift/brain/history.json").unlink(
+                            Path("~/.null-shift/brain/history.json").expanduser().unlink(
                                 missing_ok=True
                             )
                             self.add_message(Message.user("History deleted."))
                         case "c":
                             self.messages.controls.clear()
                         case "crm" | "rmc" | "rm c" | "c rm":
-                            Path("/home/luuppi/.null-shift/brain/history.json").unlink(
+                            Path("~/.null-shift/brain/history.json").expanduser().unlink(
                                 missing_ok=True
                             )
                             self.messages.controls.clear()

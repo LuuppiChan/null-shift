@@ -64,7 +64,4 @@ class GuiConfig(BaseModel):
     speak: TTSConfig = Field(default_factory=TTSConfig)
 
 
-manager = ConfigManager(
-    Path("/home/luuppi/Documents/coding/projects/null_shift/gui/config.toml"),
-    GuiConfig(),
-)
+manager = ConfigManager(Path("gui/config.toml"), GuiConfig())
