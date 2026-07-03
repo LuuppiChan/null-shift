@@ -1024,7 +1024,7 @@ async def main(page: ft.Page):
     page.window.prevent_close = True
     page.title = "Null Shift"
     page.window.on_event = on_close
-    page.window.frameless = True
+    # page.window.frameless = True
     page.theme_mode = ft.ThemeMode.DARK
     # page.scroll = ft.ScrollMode.AUTO
 
