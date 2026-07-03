@@ -1,6 +1,6 @@
 import asyncio
 import logging
-import signal
+import sys
 
 import zmq
 import zmq.asyncio
@@ -18,6 +18,10 @@ ctx = zmq.asyncio.Context()
 
 
 def handle_signals():
+    if sys.platform.startswith("win"):
+        return
+
+    import signal
     count = 0
     loop = asyncio.get_running_loop()
 
