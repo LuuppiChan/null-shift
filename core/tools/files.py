@@ -478,13 +478,14 @@ def file_edit(
     description="""Writes or appends content to a file.
 Also can be used to delete files and directories by giving a path to them and writing an empty string.
 Args:
-    file_path: Absolute path to the file or an artifact name.
+    file_path: Absolute path to the file or an artifact name. If the last character is a `/` it's considered a folder and will be created.
     content: The text to write. An empty string means to delete the file.
     overwrite: If True, replaces content. If False, appends."""
 )
 def file_write(
     file_path: str | Artifacts, content: str, overwrite: bool = False
 ) -> str:
+    is_folder = file_path.endswith("/")
     resolved_path, err = _validate_and_resolve_path(file_path, "edit")
     if err:
         return err
@@ -494,6 +495,10 @@ def file_write(
         # Create directory if it doesn't exist (useful for scratchpad)
         path = Path(file_path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        if is_folder:
+            path.mkdir(exist_ok=True)
+            return f"Created a directory at {file_path}"
+
         if content == "":
             if path.is_dir():
                 try:
