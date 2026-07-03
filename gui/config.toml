@@ -4,10 +4,10 @@ end_space_height = 200
 tooltip_len = 500
 auto_send_voice = true
 send_pdf_bin = false
-core_history = "/home/luuppi/.null-shift/brain/history.json"
+core_history = "~/.null-shift/brain/history.json"
 
 [voice.whisper]
-model_path = "/home/luuppi/Documents/coding/projects/null_shift/models/whisper/en/ggml-large-v3-turbo-q5_0.bin"
+model_path = "models/whisper/en/ggml-large-v3-turbo-q5_0.bin"
 threads = 12
 
 [voice]
@@ -120,7 +120,7 @@ asmr = 'A S M R'
 '(?:\#)' = ''
 
 [speak.piper]
-model = "/home/luuppi/Documents/coding/projects/null_shift/models/piper/en_GB-alan-low.onnx"
-config = "/home/luuppi/Documents/coding/projects/null_shift/models/piper/en_GB-alan-low.onnx.json"
+model = "models/piper/en_GB-alan-low.onnx"
+config = "models/piper/en_GB-alan-low.onnx.json"
 cuda = false
 pool_size = 4

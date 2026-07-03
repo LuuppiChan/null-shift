@@ -928,7 +928,7 @@ class Chat(ft.Container):
         if not cfg.core_history:
             return
 
-        history_path = Path(cfg.core_history)
+        history_path = Path(cfg.core_history).expanduser().resolve()
         if not history_path.is_file():
             return
 
