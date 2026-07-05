@@ -32,13 +32,15 @@ class PiperTTSBackend(BaseTTSBackend):
         self.first_load = False
 
         cfg = manager.get_config()
-        for _ in range(self.pool_size):
+        for i in range(self.pool_size):
             model = piper.PiperVoice.load(
                 model_path=cfg.speak.piper.model,
                 config_path=cfg.speak.piper.config,
                 use_cuda=cfg.speak.piper.cuda,
             )
             self.model_pool.put(model)
+            logger.info("Model %s loaded", i + 1)
+        logger.info("All models loaded")
 
     def config_updated(self, cfg: GuiConfig):
         if self.config == cfg.speak.piper:
@@ -54,7 +56,8 @@ class PiperTTSBackend(BaseTTSBackend):
         gc.collect()
 
         self.pool_size = cfg.speak.piper.pool_size
-        self.load_models()
+        # We reset so that we don't have to load models here and possibly hang.
+        self.first_load = True
 
     def generate(self, text: str) -> AudioFile:
         if self.first_load:

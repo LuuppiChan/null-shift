@@ -63,6 +63,11 @@ class Transcriber:
         self.async_emitter_task = asyncio.create_task(listen())
 
     async def start(self):
+        # reordered here because it can now capture mic even before the stt is started
+        # I think...
+        await self.async_emitter()
+        self.mic_listener.start()
+
         if self.whisper is None:
             self.whisper = WhisperSTT()
 
@@ -70,8 +75,6 @@ class Transcriber:
         self.transcriber_thread = threading.Thread(
             target=self._transcription_worker, daemon=True
         )
-        await self.async_emitter()
-        self.mic_listener.start()
         self.transcriber_thread.start()
 
     async def stop(self):

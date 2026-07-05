@@ -81,7 +81,7 @@ class TextToSpeech:
         logger.info("Stopping tts stream gracefully")
         self.running = False
         if self.speak_task is not None and not self.speak_task.done():
-            await self.speak_queue.put(None)
+            self.speak_queue.put_nowait(None)
 
     async def abort(self):
         """Stop speaking."""
