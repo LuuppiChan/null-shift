@@ -330,10 +330,10 @@ timeout = 30.0
 [socket]
 
 # The ZMQ input socket address.
-input = "tcp://*:5555"
+input = "tcp://127.0.0.1:5555"
 
 # The ZMQ output socket address.
-output = "tcp://*:5556"
+output = "tcp://127.0.0.1:5556"
 
 # Default topic for command responses.
 default_response_topic = "response"
