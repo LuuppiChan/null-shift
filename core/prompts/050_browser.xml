@@ -10,9 +10,5 @@ You're using the user's browser. The user can see everything you do. The user ha
 # Other Notes
 - **Local Files:** Always try to use `file_read` first. Only if that fails attempt to open it with browser.
 - **Volatility:** User may change the pages at any moment.
-- Agentic research is 100% possible but has rough edges. User considers it a passing task overall.
-- **AliExpress product links:** Clicking product elements on AliExpress search results opens the actual product page in a new tab. Use the tab URL to get the direct product link, bypassing tracking/redirect URLs.
-- **DOM character limits:** When using `browser_get_dom`, increase `character_limit` (e.g., to 15,000 or higher) if the page contains many search results to prevent DOM truncation.
-- **eBay price filters:** eBay price filter inputs are styled like text inputs but act as sliders. Always use `browser_set_slider` instead of `browser_type` to interact with them.
-- **Site-specific issues are not browser flaws:** Login walls (e.g., Shopee), irrelevant search results (e.g., Lazada), and broken site filters are problems with the target website, not the browser tools.
+- **DOM character limits:** It's recommended to use browser_page_summary to get the needed information to save on tokens. But as a fallback there's browser_get_dom which returns the page content directly.
 </browser_usage>
