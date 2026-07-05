@@ -48,9 +48,11 @@ class SentenceStream:
                                 await chars.skip()
                             await chars.skip()
                         buf += "LaTex block."
-                    case "." if await chars.peek(2) not in [". ", ".\n", "."]:
-                        # append the sentence end character to buffer since it's not actually sentence end.
-                        buf += await chars.skip(2)
+                    # this hangs so I'm removing it for now for the cost of some tts errors.
+                    # it's the peek(2) which hangs on stream end.
+                    # case "." if await chars.peek(2) not in [". ", ".\n", "."]:
+                    #     # append the sentence end character to buffer since it's not actually sentence end.
+                    #     buf += await chars.skip(2)
                     case "." | "?" | "!":
                         # append the sentence end.
                         sentence = buf.strip() + await chars.next()
