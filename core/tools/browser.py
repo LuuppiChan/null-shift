@@ -11,9 +11,6 @@ from global_types import BusMessage
 # from tools.browser.config import manager
 from tools.browser.message_types import Action
 
-# Module-level ZMQ context to avoid creating new contexts for every request
-_zmq_ctx = zmq.Context()
-
 
 def send_browser_request(_action: str, **kwargs: Any) -> Any:
     """
@@ -26,6 +23,7 @@ def send_browser_request(_action: str, **kwargs: Any) -> Any:
     Returns:
         The 'result' field from the browser's response payload.
     """
+    ctx = zmq.Context()
     # I guess this works lol
     # config = manager.get_config()
 
@@ -33,7 +31,8 @@ def send_browser_request(_action: str, **kwargs: Any) -> Any:
     # address = config.socket_path.replace("*", "localhost")
     address = "tcp://127.0.0.1:5557"
 
-    socket = _zmq_ctx.socket(zmq.REQ)
+    socket = ctx.socket(zmq.REQ)
+    socket.setsockopt(zmq.RCVTIMEO, 5_000)
     socket.connect(address)
 
     try:
@@ -53,6 +52,7 @@ def send_browser_request(_action: str, **kwargs: Any) -> Any:
         return response.payload.get("result")
     finally:
         socket.close()
+        ctx.destroy()
 
 
 @tool(
@@ -74,7 +74,7 @@ Prefer this over the browser_get_dom.
 Internally just feeds the result of browser_get_dom and the `message` parameter to an AI model.
 You can ask any question about the currently focused website."""
 )
-def page_summary(message: str = "Summarize the contents of this page") -> str:
+def browser_page_summary(message: str = "Summarize the contents of this page") -> str:
     return asyncio.run(
         ask_ai(
             message,
@@ -185,6 +185,16 @@ def browser_misc_action(element_id: int, action_event: str) -> str:
     return send_browser_request(
         Action.MISC_ACTION, element_id=element_id, action_event=action_event
     )
+
+
+@tool(
+    description="""Run javascript on the current page.
+
+expression: JavaScript expression to be evaluated in the browser context. If the expression evaluates to a function, the function is automatically invoked.
+"""
+)
+def browser_page_javascript(expression: str) -> str:
+    return send_browser_request(Action.PAGE_JAVASCRIPT, expression=expression)
 
 
 @tool(

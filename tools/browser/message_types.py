@@ -26,6 +26,7 @@ class Action(StrEnum):
     ELEMENT_SCREENSHOT = "element_screenshot"
     SELECT_OPTION = "select_option"
     VIDEO_CONTROL = "video_control"
+    PAGE_JAVASCRIPT = "page_javascript"
 
 
 class BrowserMessage(BaseModel):

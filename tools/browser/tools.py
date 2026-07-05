@@ -1,6 +1,6 @@
 import asyncio
 import base64
-from typing import Any
+from typing import Any, Optional
 
 import cv2
 import numpy as np
@@ -281,6 +281,15 @@ async def _get_locator(page: Page, element_id: int):
         except Exception:
             pass
     return page.locator(selector).first
+
+
+async def page_javascript(page: Page, expression: str) -> str:
+    """
+    Run javascript on the current page.
+    Args:
+        expression: JavaScript expression to be evaluated in the browser context. If the expression evaluates to a function, the
+    """
+    return await page.evaluate(expression)
 
 
 async def click_element(page: Page, element_id: int) -> str:

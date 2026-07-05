@@ -26,6 +26,7 @@ from tools.browser.tools import (
     fill_input,
     get_agent_dom,
     hover_element,
+    page_javascript,
     press_keyboard_key,
     scroll_page,
     select_combo_option,
@@ -222,6 +223,8 @@ class BrowserControl:
                         await self.send(await hover_element(page, **msg.kwargs))
                     case Action.MISC_ACTION:
                         await self.send(await execute_misc_action(page, **msg.kwargs))
+                    case Action.PAGE_JAVASCRIPT:
+                        await self.send(await page_javascript(page, **msg.kwargs))
                     case Action.NAVIGATE:
                         url = msg.kwargs.get("url")
                         if url:
