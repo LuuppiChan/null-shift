@@ -115,13 +115,19 @@ def _validate_and_resolve_path(
 
     if action == "edit":
         if cfg.file_prompt_edit and not _bypass_prompt(file_path):
-            if not get_permission(cfg.file_prompt_edit_prompt.format(file_path)):
-                return "", f"User declined the request to edit {file_path}"
+            accepted, reason = get_permission(
+                cfg.file_prompt_edit_prompt.format(file_path)
+            )
+            if not accepted:
+                return "", reason
 
     else:
         if cfg.file_prompt_read and not _bypass_prompt(file_path):
-            if not get_permission(cfg.file_prompt_read_prompt.format(file_path)):
-                return "", f"User declined the request to read {file_path}"
+            accepted, reason = get_permission(
+                cfg.file_prompt_read_prompt.format(file_path)
+            )
+            if not accepted:
+                return "", reason
 
     # Resolves the file path just in case.
     return str(Path(file_path).expanduser().resolve()), None
@@ -775,7 +781,9 @@ Args:
     target_path: Destination path where contents will be extracted.
     format: The archive format: one of "zip", "tar", "gztar", "bztar", or "xztar".  Or any other registered format.  If not provided, unpack_archive will use the filename extension and see if an unpacker was registered for that extension."""
 )
-def decompress_file(input_path: str, target_path: str, format: str | None = None) -> str:
+def decompress_file(
+    input_path: str, target_path: str, format: str | None = None
+) -> str:
     # 1. Expand user (e.g., '~') and resolve to an absolute path for the input
     resolved_input = Path(input_path).expanduser().resolve()
 

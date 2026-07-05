@@ -22,6 +22,7 @@ def handle_signals():
         return
 
     import signal
+
     count = 0
     loop = asyncio.get_running_loop()
 
@@ -97,12 +98,14 @@ async def listener_loop(input_queue: asyncio.Queue[BusMessage]):
 
 
 async def main():
+    state.main_loop = asyncio.get_running_loop()
     handle_signals()
 
+    logger.info("Starting Vector")
     input_queue: asyncio.Queue[BusMessage] = asyncio.Queue()
     vector = core.vector.Vector(input_queue)
 
-    logger.info("Starting listener")
+    logger.info("Starting processes")
     listen_task = asyncio.create_task(listener_loop(input_queue), name="listen")
     consumer_task = asyncio.create_task(vector.consumer_loop(), name="consumer")
     message_task = asyncio.create_task(vector.message_loop(), name="message")

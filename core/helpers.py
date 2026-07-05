@@ -1,10 +1,12 @@
 import asyncio
 import base64
+from datetime import datetime, timedelta
 import json
 import logging
 import subprocess
 import tempfile
 from pathlib import Path
+from time import sleep
 from typing import Any, Literal, Optional, Self, cast, overload
 
 import cv2
@@ -18,7 +20,7 @@ from langchain_core.messages import (
 import numpy as np
 
 from core.backends import get_backend
-from core.config import manager, tool_manager
+from core.config import manager, tool_manager, state
 from core.registry import LLMTool
 
 
@@ -376,42 +378,71 @@ def compress_audio(
         return base64_str
 
 
-def get_permission(prompt: str) -> bool:
+def get_permission(prompt: str) -> tuple[bool, str]:
     """
-    Placeholder for permission to use this tool.
-    Currently asks console input.
+    Sends a permission request.
+    Gives the result and decline_reason.
     """
+    from core.socket_system import socket_out
+    from global_types import BusMessage, MessageTopic, PendingPermissionRequest
+
+    logger = logging.getLogger("get_permission")
+
+    assert state.main_loop is not None
+
     timeout = manager.get_config().permissions.timeout
+    req = PendingPermissionRequest(title=prompt)
+    state.pending_permission_requests.append(req)
+    try:
+        asyncio.run_coroutine_threadsafe(
+            socket_out.send(
+                BusMessage(
+                    topic=MessageTopic.PERMISSION_REQUEST,
+                    payload=req.model_dump(),
+                )
+            ),
+            state.main_loop,
+        ).result(5)
+    except TimeoutError as e:
+        logger.error(
+            "Failed to send permission request to socket_out: %s",
+            e,
+            exc_info=True,
+            stack_info=True,
+        )
+        return False, "Failed to send permission request. Inform user."
 
-    # Socket system thing here I think.
-    print(prompt)
-    output = subprocess.run(
-        [
-            "zenity",
-            "--question",
-            "--title",
-            "Vector Permission Request",
-            "--text",
-            prompt,
-        ],
-        timeout=timeout,
-        #                                   ^^^^ will be customizable
-    )
-    if output.returncode == 0:
-        text = "yes"
+    end = datetime.now() + timedelta(seconds=timeout)
+    while datetime.now() < end:
+        for res in state.pending_permission_responses:
+            if res.id == req.id:
+                state.pending_permission_responses.remove(res)
+                state.pending_permission_requests.remove(req)
+                break
+        sleep(0.01)
     else:
-        text = "no"
+        logger.warning("Permission %s timed out.", req.id)
+        state.pending_permission_requests.remove(req)
+        res = req
+        res.accepted = False
+        res.decline_reason = "Permission request timed out."
 
-    if text is None:
-        return False
+    if res.accepted is not None:
+        return res.accepted, res.decline_reason
+
+    if res.response_text is None:
+        logger.error(
+            "Permission request didn't have res.accepted or res.response_text, automatically declining."
+        )
+        return False, "Permission response was malformed. Inform the user."
 
     # Prioritise decline
     for word in manager.get_config().permissions.no_words:
-        if word.lower() in text.lower():
-            return False
+        if word.lower() in res.response_text.lower():
+            return False, res.decline_reason
 
     for word in manager.get_config().permissions.yes_words:
-        if word.lower() in text.lower():
-            return True
+        if word.lower() in res.response_text.lower():
+            return True, res.decline_reason
 
-    return False
+    return False, res.decline_reason

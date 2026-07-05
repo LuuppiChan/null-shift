@@ -12,7 +12,7 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from global_tools import ConfigManager
-from global_types import Difficulty
+from global_types import Difficulty, PendingPermissionRequest
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +282,9 @@ class RuntimeState(BaseModel):
 
     shutdown_event: asyncio.Event = Field(default_factory=asyncio.Event)
     is_running: bool = False
+    pending_permission_requests: list[PendingPermissionRequest] = Field(default_factory=list)
+    pending_permission_responses: list[PendingPermissionRequest] = Field(default_factory=list)
+    main_loop: asyncio.AbstractEventLoop | None = None
 
 
 manager = ConfigManager(Path("core_config.toml"), CoreConfig())

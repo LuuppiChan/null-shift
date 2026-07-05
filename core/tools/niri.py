@@ -47,8 +47,11 @@ def focus_window(id: int) -> str:
     try:
         config = tool_manager.get_config()
         if config.niri_focus_window_permission:
-            if not get_permission(config.niri_focus_window_prompt.format(id=id)):
-                return "User declined the request to switch window focus."
+            accepted, reason = get_permission(
+                config.niri_focus_window_prompt.format(id=id)
+            )
+            if not accepted:
+                return reason
 
         _ = subprocess.run(
             ["niri", "msg", "action", "focus-window", "--id", str(id)],
@@ -66,8 +69,11 @@ def set_monitor(state: Literal["on", "off"]) -> str:
     try:
         config = tool_manager.get_config()
         if config.niri_set_monitor_permission:
-            if not get_permission(config.niri_set_monitor_prompt.format(state=state)):
-                return f"User declined the request to turn {state} the monitors."
+            accepted, reason = get_permission(
+                config.niri_set_monitor_prompt.format(state=state)
+            )
+            if not accepted:
+                return reason
 
         subprocess.run(["niri", "msg", "action", f"power-{state}-monitors"], check=True)
         return f"Monitors are now {state}."

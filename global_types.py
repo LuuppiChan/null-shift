@@ -12,6 +12,7 @@ from enum import StrEnum
 from multiprocessing.connection import Connection, Pipe
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional, Self, cast
+import uuid
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +29,8 @@ class MessageTopic(StrEnum):
     FINISHED = "event.finished"
     STARTED = "event.started"
     ABORT = "event.abort"
+    PERMISSION_REQUEST = "event.permission"
+    PERMISSION_RESPONSE = "permission"
     COMMAND_RESPONSE = "response"
 
 
@@ -114,6 +117,14 @@ class InputCommand(BaseModel):
 
     command: str
     args: list[Any] = Field(default_factory=list)
+
+
+class PendingPermissionRequest(BaseModel):
+    title: str = "Permission request"
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    accepted: bool | None = None
+    response_text: str | None = None
+    decline_reason: str = "The request has been declined."
 
 
 def command_response(**values: Any) -> dict[str, Any]:

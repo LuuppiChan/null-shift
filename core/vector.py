@@ -30,6 +30,7 @@ from global_types import (
     InputMessage,
     MessageTopic,
     MessageType,
+    PendingPermissionRequest,
     command_response,
     convert_to_langchain_media,
     is_autonomous,
@@ -137,8 +138,29 @@ class Vector:
         elif topic[0] == MessageTopic.COMMAND:
             await self._handle_command(message)
 
+        elif topic[0] == MessageTopic.PERMISSION_RESPONSE:
+            await self._handle_permission(message)
+
         else:
             logger.warning("Unknown input topic: %s", message.topic)
+
+    async def _handle_permission(self, response: BusMessage):
+        logger.info("Adding permission request response to state list.")
+        try:
+            msg = PendingPermissionRequest.model_validate(**response.payload)
+            for req in state.pending_permission_requests:
+                if req.id == msg.id:
+                    state.pending_permission_responses.append(msg)
+                    break
+            else:
+                logger.warning(
+                    "Didn't find a matching permission request for the response."
+                )
+
+        except ValidationError:
+            logger.error(
+                "Error validating PendingPermissionRequest: %s", response.payload
+            )
 
     async def _handle_input(self, message: InputMessage):
         match message.type:
@@ -364,7 +386,41 @@ class Vector:
                                 case "text":
                                     out_msg.text = part.get("text")
                                 case "thinking":
+                                    # why am I not saving it to an easily accessible place?
                                     out_msg.reasoning = part.get("thinking")
+                                case "reasoning":
+                                    # content=[{'summary': [{'index': 0, 'type': 'summary_text', 'text': '**Answering philosophical questions**\n\nI'}], 'index': 0, 'type': 'reasoning'}]
+                                    summary_list: list[dict[str, int | str]] | None = (
+                                        part.get("summary")
+                                    )
+                                    if isinstance(summary_list, list):
+                                        for item in summary_list:
+                                            if out_msg.reasoning is None:
+                                                out_msg.reasoning = item.get("text")
+                                            else:
+                                                out_msg.reasoning += item.get(
+                                                    "text", ""
+                                                )
+                                            if (
+                                                "reasoning_content"
+                                                in full_response.additional_kwargs
+                                                and isinstance(
+                                                    full_response.additional_kwargs[
+                                                        "reasoning_content"
+                                                    ],
+                                                    str,
+                                                )
+                                            ):
+                                                full_response.additional_kwargs[
+                                                    "reasoning_content"
+                                                ] += item.get("text", "")
+                                            else:
+                                                full_response.additional_kwargs[
+                                                    "reasoning_content"
+                                                ] = item.get("text")
+                                case "function_call":
+                                    ...
+                                    # content=[{'type': 'function_call', 'name': 'browser_close_tab', 'arguments': '{"tab_index', 'call_id': 'call_zsjXgqfMEkupjtc3jp1Gui2L', 'id': 'fc_tmp_xgub93viza', 'index': 0}] additional_kwargs={} response_metadata={'model_provider': 'openai', 'id': 'gen-1783107070-5ZayIrvuS5VGXEu1yQXu'} id='gen-1783107070-5ZayIrvuS5VGXEu1yQXu' tool_calls=[{'name': 'browser_close_tab', 'args': {}, 'id': 'call_zsjXgqfMEkupjtc3jp1Gui2L', 'type': 'tool_call'}] invalid_tool_calls=[] tool_call_chunks=[{'name': 'browser_close_tab', 'args': '{"tab_index', 'id': 'call_zsjXgqfMEkupjtc3jp1Gui2L', 'index': 0, 'type': 'tool_call_chunk'}]
                                 case None:
                                     logger.warning(
                                         "Type not found in answer dict part: %s", part
@@ -373,6 +429,7 @@ class Vector:
                                     logger.error(
                                         "Unhandled dict type: %s", part.get("type")
                                     )
+                                    logger.error("Dict content: %s", part)
                 case list() if all(isinstance(item, str) for item in content):
                     # It's a list of strings
                     logger.warning(
