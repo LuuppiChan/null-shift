@@ -412,13 +412,22 @@ def get_permission(prompt: str) -> tuple[bool, str]:
         )
         return False, "Failed to send permission request. Inform user."
 
+    response_received = False
     end = datetime.now() + timedelta(seconds=timeout)
     while datetime.now() < end:
         for res in state.pending_permission_responses:
             if res.id == req.id:
                 state.pending_permission_responses.remove(res)
                 state.pending_permission_requests.remove(req)
+                response_received = True
                 break
+        else:
+            response_received = False
+
+        if response_received:
+            # it's not unbound (read above pattern)
+            res = res  # pyright: ignore[reportPossiblyUnboundVariable]
+            break
         sleep(0.01)
     else:
         logger.warning("Permission %s timed out.", req.id)
