@@ -60,6 +60,7 @@ class TextToSpeech:
         self.running = True
         if self.speak_task is not None:
             self.speak_task.cancel()
+            # possible hang
             # await self.speak_task
         while not self.speak_queue.empty():
             self.speak_queue.get_nowait()
