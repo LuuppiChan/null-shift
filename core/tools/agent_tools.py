@@ -13,15 +13,15 @@ from core.config import tool_manager
 class NotAutonomous(Exception): ...
 
 
-if not is_autonomous(vector.data.agent.difficulty):
+if not is_autonomous(vector.data.agent.difficulty) or vector.data.agent.completed:
     raise NotAutonomous("Current task doesn't need agent tools.")
 
 
 @tool(
-    description="""Complete your current objective.
+    description="""Complete your current objective in AUTONOMOUS_STRICT or AUTONOMOUS_TRAJECTORY mode.
 
-If the system prompt tells that you are in agent mode (Autonomous Strict or Autonomous Trajectory) you must call this after completing the current objective.
-If the current mode is Simple or Tool Assisted you don't need to call this.
+If the system prompt tells that you are in agent mode (AUTONOMOUS_STRICT or AUTONOMOUS_TRAJECTORY) you must call this after completing the current objective.
+If the current mode is SIMPLE or TOOL_ASSISTED you should not call this.
 
 Args:
     remove_artifacts: Delete task.md and plan.md"""
@@ -49,11 +49,13 @@ def agent_planner(plan: str | None = None, task: str | None = None) -> str:
     cfg = tool_manager.get_config()
     feedback = ["The following artifact(s) have been updated: "]
     if plan is not None:
-        plan_path = Path(cfg.dynamic_plan_path)
+        plan_path = Path(cfg.dynamic_plan_path).expanduser().resolve()
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
         plan_path.write_text(plan)
         feedback.append("plan")
     if task is not None:
-        task_path = Path(cfg.dynamic_task_path)
+        task_path = Path(cfg.dynamic_task_path).expanduser().resolve()
+        task_path.parent.mkdir(parents=True, exist_ok=True)
         task_path.write_text(task)
         feedback.append("task")
     return " ".join(feedback)
