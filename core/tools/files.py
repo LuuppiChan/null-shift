@@ -7,8 +7,6 @@ import shutil
 from pathlib import Path
 from typing import Literal, Optional
 
-import magic
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 
@@ -168,6 +166,9 @@ def _file_read(
         character_limit: Max character limit. None means default max character limit.
         show_line_numbers: Show line numbers when reading text.
     """
+    import magic
+    from langchain_community.document_loaders import PyPDFLoader
+
     resolved_path, err = _validate_and_resolve_path(file_path, "read")
     if err:
         return err
