@@ -53,16 +53,16 @@ class ToolRegistry:
         """Gets all the tools from tools folder."""
 
         needs_refresh = self.refreshed + timedelta(
-            manager.get_config().tool_config.min_refresh_delay
+            seconds=manager.get_config().tool_config.min_refresh_delay
         )
-        if datetime.now() > needs_refresh:
+        if self.cache and datetime.now() <= needs_refresh:
             logger.info(
                 "Tools are fresh enough, returning cache without checking file changes."
             )
             return self.tool_cache
         else:
             logger.info(
-                "Tools have exeeded minimum refresh time, they will be refreshed."
+                "Tools have exceeded minimum refresh time, they will be refreshed."
             )
 
         await self.refresh_cache()
