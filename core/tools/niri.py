@@ -135,25 +135,38 @@ def read_screen(area: Literal["monitor", "window"] = "monitor") -> list[dict[str
 # THe set monitor off being the most useful.
 
 
-@tool(description="""Set sound volume for the user.""")
-def set_volume(percentage: float, relative: bool = False) -> str:
-    percentage = percentage / 100
-    if isinstance(percentage, float):
-        percentage = min(max(percentage, 1), 0)
+@tool(
+    description="""Set sound volume for the user.
+For example:
+Value of `0.25` and relative = false sets the sound to 1/4 of the max volume.
+Value of `-0.05` and relative = frue sets the sound to `current - 0.05`.
+"""
+)
+def set_volume(value: float, relative: bool = False) -> str:
+    if value == 0:
+        pass
+    elif value < 1:
+        pass
+    else:
+        value = value / 100
+    value = max(min(value, 1), 0)
 
     rel = ""
     if relative:
-        if percentage < 0:
-            rel = f"{abs(percentage)}-"
+        if value < 0:
+            rel = f"{abs(value)}-"
         else:
-            rel = f"{percentage}+"
+            rel = f"{value}+"
 
-    return (
-        subprocess.run(
-            ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", str(percentage) + rel],
-            check=True,
-            text=True,
-            capture_output=True,
-        ).stdout
-        or f"Volume set to {percentage}."
+    subprocess.run(
+        ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", rel or str(value)],
+        check=True,
+        text=True,
+        capture_output=True,
     )
+    return subprocess.run(
+        ["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"],
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout
