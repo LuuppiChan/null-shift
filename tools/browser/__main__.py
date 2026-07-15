@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from pathlib import Path
 from typing import Any, AsyncIterable
 
 import zmq.asyncio
@@ -65,7 +66,7 @@ class BrowserControl:
                 self.p = await self._playwright_context_manager.__aenter__()
 
             self.browser = await self.p.chromium.connect_over_cdp(
-                f"http://localhost:{self.port}"
+                f"http://localhost:{self.port}", artifacts_dir=Path.home() / "Downloads"
             )
 
             def on_disconnect(_):
@@ -122,6 +123,15 @@ class BrowserControl:
                 # Open a temporary, lightweight CDP session to ask the page for its true ID
                 client = await self.ctx.new_cdp_session(page)
                 target_info = await client.send("Target.getTargetInfo")
+                # This makes the download popup window possibly appear if it's enabled.
+                # Weigh the pros and cons. Currently I'll use per-page message.
+                # await client.send(
+                #     "Browser.setDownloadBehavior",
+                #     {
+                #         "behavior": "allow",
+                #         "downloadPath": str(Path.home() / "Downloads"),
+                #     },
+                # )
                 await client.detach()  # Clean up the session
 
                 # If the IDs match, this is definitively our active tab
@@ -169,7 +179,7 @@ class BrowserControl:
                         await self.send(
                             "\n".join(
                                 [
-                                    f"[{tab['index']} (active: {tab["active"]})]: {tab['title']} ({tab['url']})"
+                                    f"[{tab['index']} (active: {tab['active']})]: {tab['title']} ({tab['url']})"
                                     for tab in tabs
                                 ]
                             )
@@ -205,6 +215,24 @@ class BrowserControl:
                         "Error: No active page available. The browser might have no open tabs, or the current tab crashed/is restricted. Use the 'browser_new_tab' tool to open a fresh page."
                     )
                     continue
+
+                async def set_download_behavior(page: Page):
+                    if self.ctx is None:
+                        logger.error(
+                            "I don't know how, but the context is None even though a page exists. Should never happen so it will probably happen at some point."
+                        )
+                        return
+                    client = await self.ctx.new_cdp_session(page)
+                    await client.send(
+                        "Page.setDownloadBehavior",
+                        {
+                            "behavior": "allow",
+                            "downloadPath": str(Path.home() / "Downloads"),
+                        },
+                    )
+                    await client.detach()
+
+                await set_download_behavior(page)
 
                 match msg.action:
                     case Action.DOM:
