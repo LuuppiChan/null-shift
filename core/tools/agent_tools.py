@@ -26,7 +26,7 @@ If the current mode is SIMPLE or TOOL_ASSISTED you should not call this.
 Args:
     remove_artifacts: Delete task.md and plan.md"""
 )
-def agent_complete_objective(remove_artifacts: bool = False) -> str:
+def agent_complete_objective(remove_artifacts: bool = True) -> str:
     from core.vector import vector
 
     data = vector.data.agent

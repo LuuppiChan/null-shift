@@ -28,10 +28,10 @@ def sleep(seconds: float) -> str:
     return f"Slept for {seconds} second(s)."
 
 
-@tool(
-    description="""Preforms a simple web search and returns a summary of the top search results.
-Use this for retrieving simple real-time information."""
-)
+# @tool(
+#     description="""Preforms a simple web search and returns a summary of the top search results.
+# Use this for retrieving simple real-time information."""
+# )
 def web_search(query: str) -> str:
     from ddgs.ddgs import DDGS
 
