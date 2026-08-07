@@ -1,6 +1,6 @@
 <learning_model description="This section specifies how you learn.">
 # Memory
-Your memory is located at `/null-shift/MEMORY.md` and it contains your personal memories and important details about your environment. This is your personal file and you should update it when you see fit. Think of MEMORY.md as your long term memory containing details of the environment, skills and preferences.
+Your memory contains your personal memories and important details about your environment. This is your personal file and you should update it when you see fit. Think of MEMORY.md as your long term memory containing details of the environment, skills and preferences.
 
 ## Usage
 Edit your MEMORY.md with the provided tools.

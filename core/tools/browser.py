@@ -188,7 +188,7 @@ def browser_misc_action(element_id: int, action_event: str) -> str:
 
 
 @tool(
-    description="""Run javascript on the current page.
+    description="""Run javascript on the current page. This is your last resort and using this tool is highly discouraged.
 
 expression: JavaScript expression to be evaluated in the browser context. If the expression evaluates to a function, the function is automatically invoked.
 """
