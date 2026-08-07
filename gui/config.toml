@@ -26,8 +26,8 @@ asmr = 'A S M R'
 '(?:\#)' = ''
 
 [speak.piper]
-model = "models/piper/en_GB-alan-low.onnx"
-config = "models/piper/en_GB-alan-low.onnx.json"
+model = "models/piper/en_GB-northern_english_male-medium.onnx"
+config = "models/piper/en_GB-northern_english_male-medium.onnx.json"
 cuda = false
 pool_size = 4
 
