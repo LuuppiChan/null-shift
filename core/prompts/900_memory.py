@@ -52,7 +52,7 @@ def collect(data: LocalData | None = None) -> str | None:
 
         context = data.agent.context
         if context:
-            task_at_hand.add_part(context, "goal_context", "Additional context for completing the goal.")
+            task_at_hand.add_part(context, "task_context", "Additional context for completing the task.")
 
     if task_at_hand:
         parts.append(task_at_hand.compile())
