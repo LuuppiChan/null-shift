@@ -4,7 +4,7 @@ from typing import Any, Optional
 
 import cv2
 import numpy as np
-
+from tools.browser.config import manager
 from playwright.async_api import Page
 
 
@@ -328,6 +328,7 @@ async def fill_input(
     """
     is_google_docs = "docs.google.com/document/" in page.url
     locator = await _get_locator(page, element_id)
+    config = manager.get_config()
 
     try:
         if is_google_docs:
@@ -340,14 +341,14 @@ async def fill_input(
                 await page.keyboard.press("Control+A")
                 await page.keyboard.press("Meta+A")
                 await page.keyboard.press("ArrowRight")
-            await page.keyboard.type(text, delay=10)
+            await page.keyboard.type(text, delay=config.typing_delay_ms)
         else:
             is_rich_text = await locator.evaluate(
                 "(el) => el.isContentEditable || el.getAttribute('role') === 'textbox'"
             )
 
             if is_rich_text:
-                await locator.click(timeout=3000)
+                await locator.click(timeout=config.typing_timeout_ms)
                 if overwrite:
                     await page.keyboard.press("Control+A")
                     await page.keyboard.press("Meta+A")
@@ -356,13 +357,15 @@ async def fill_input(
                     await page.keyboard.press("Control+A")
                     await page.keyboard.press("Meta+A")
                     await page.keyboard.press("ArrowRight")
-                await page.keyboard.type(text, delay=5)
+                await page.keyboard.type(text, delay=config.typing_delay_ms)
             else:
                 if overwrite:
                     # .fill() automatically clears the existing text first
-                    await locator.fill(text, timeout=3000)
+                    await locator.fill(text, timeout=config.typing_timeout_ms)
                 else:
-                    await locator.press_sequentially(text, timeout=3000)
+                    await locator.press_sequentially(
+                        text, timeout=config.typing_timeout_ms
+                    )
 
         if press_enter:
             if is_google_docs:

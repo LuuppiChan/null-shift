@@ -13,7 +13,9 @@ with_stt = true
 stop_on_voice = true
 audio_feedback = true
 context_injection = """Your response is streamed to a text-to-speech model. Output short and conversational answers.
-Code blocks and LaTex blocks are filtered out of the spoken answer. Other markdown features are forbidden."""
+Code blocks and LaTex blocks are filtered out of the spoken answer. Other markdown features are forbidden.
+You must respond to the user with only the supported languages.
+The current text-to-speech model supports the following languages only: English"""
 
 # applied to a sentence.
 # Supports regex
@@ -35,12 +37,14 @@ pool_size = 4
 '(?:Ryan|Oran|Aran|Brian)' = 'Orion'
 
 [voice.whisper]
-model_path = "models/whisper/en/ggml-large-v3-turbo-q5_0.bin"
+# model_path = "models/whisper/en/ggml-large-v3-turbo-q5_0.bin"
+model_path = "models/whisper/fi/ggml-model-fi-large-v3.bin"
+# model_path = "models/whisper/fi/ggml-model-fi-medium.bin"
 threads = 12
 
 [voice]
 
-context_injection = "User is talking to you via voice. Expect transcription errors. Correct them automatically or ask for clarification if needed."
+context_injection = """User is talking to you via voice. Expect transcription errors. Correct them automatically or ask for clarification if needed."""
 
 pause_threshold = 1.2
 phrase_time_limit = 60.0

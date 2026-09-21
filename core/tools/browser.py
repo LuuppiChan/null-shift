@@ -1,14 +1,12 @@
 import asyncio
 from typing import Any, Optional
 
-from langchain_core.messages import AIMessage, HumanMessage
 import zmq
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 
 from core.helpers import ask_ai, enforce_character_limit
 from global_types import BusMessage
-
-# from tools.browser.config import manager
 from tools.browser.message_types import Action
 
 
@@ -25,14 +23,17 @@ def send_browser_request(_action: str, **kwargs: Any) -> Any:
     """
     ctx = zmq.Context()
     # I guess this works lol
-    # config = manager.get_config()
+    # from tools.browser.config import manager
+    from core.config import tool_manager as manager
+
+    config = manager.get_config()
 
     # The browser server binds to e.g., tcp://*:5557, but the client must connect to localhost
     # address = config.socket_path.replace("*", "localhost")
     address = "tcp://127.0.0.1:5557"
 
     socket = ctx.socket(zmq.REQ)
-    socket.setsockopt(zmq.RCVTIMEO, 5_000)
+    socket.setsockopt(zmq.RCVTIMEO, config.brower_socket_timeout_ms)
     socket.connect(address)
 
     try:
@@ -67,13 +68,11 @@ def browser_get_dom(character_limit: int = 10000) -> str:
     return enforce_character_limit(send_browser_request(Action.DOM), character_limit)
 
 
-@tool(
-    description="""Return an AI summary of the current page.
+@tool(description="""Return an AI summary of the current page.
 An economical convenience tool to prevent token wasting.
-Prefer this over the browser_get_dom.
-Internally just feeds the result of browser_get_dom and the `message` parameter to an AI model.
-You can ask any question about the currently focused website."""
-)
+Use this for page overviews and other simple questions about the page.
+You can ask any question about the currently focused website.
+Note that the model doesn't have any external context besides the DOM and instructions to summarize web pages.""")
 def browser_page_summary(message: str = "Summarize the contents of this page") -> str:
     return asyncio.run(
         ask_ai(
@@ -89,13 +88,11 @@ def browser_page_summary(message: str = "Summarize the contents of this page") -
     )
 
 
-@tool(
-    description="""Clicks an interactive element on the page using its ID.
+@tool(description="""Clicks an interactive element on the page using its ID.
 
 Example:
     `browser_click(element_id=15)`
-    Simulates a mouse click on the element marked as [15]."""
-)
+    Simulates a mouse click on the element marked as [15].""")
 def browser_click(element_id: int) -> str:
     return send_browser_request(Action.CLICK, element_id=element_id)
 
@@ -104,6 +101,7 @@ def browser_click(element_id: int) -> str:
     description="""Clears an input field or textarea and types the provided text into it.
 
 Overwrite controls whether to set the field content or append to it.
+Works on any shown input fields on the DOM including Google docs.
 
 Example:
     `browser_type(element_id=4, text="search query", press_enter=True)`
@@ -134,25 +132,22 @@ def browser_extract_attribute(element_id: int, attribute: str) -> str:
     )
 
 
-@tool(
-    description="""Presses a specific keyboard key on the active page.
+@tool(description="""Presses a specific keyboard key on the active page.
 
 Example:
     `browser_press_key(key="Escape")`
     Presses the ESC key (useful for closing modals).
-    Other common keys: "Enter", "Tab", "ArrowDown", "ArrowUp"."""
-)
+    Other common keys: "Enter", "Tab", "ArrowDown", "ArrowUp".""")
 def browser_press_key(key: str) -> str:
     return send_browser_request(Action.PRESS_KEY, key=key)
 
 
-@tool(
-    description="""Scrolls the active page up or down to reveal hidden content.
+@tool(description="""Scrolls the active page up or down.
+This is only useful when taking screenshots of the visible page.
 
 Example:
     `browser_scroll(direction="down")`
-    Scrolls down one page length."""
-)
+    Scrolls down one page length.""")
 def browser_scroll(direction: str = "down") -> str:
     return send_browser_request(Action.SCROLL, direction=direction)
 
@@ -205,28 +200,23 @@ Example:
     Returns a list of dictionaries detailing the open tabs."""
 )
 def browser_list_tabs() -> Any:
-
     return send_browser_request(Action.LIST_TABS)
 
 
-@tool(
-    description="""Switches the active browser focus to the tab at the given index.
+@tool(description="""Switches the active browser focus to the tab at the given index.
 
 Example:
     `browser_switch_tab(tab_index=1)`
-    Brings the second tab (index 1) to the front."""
-)
+    Brings the second tab (index 1) to the front.""")
 def browser_switch_tab(tab_index: int) -> str:
     return send_browser_request(Action.SWITCH_TAB, tab_index=tab_index)
 
 
-@tool(
-    description="""Closes the browser tab at the given index.
+@tool(description="""Closes the browser tab at the given index.
 
 Example:
     `browser_close_tab(tab_index=2)`
-    Closes the third tab (index 2)."""
-)
+    Closes the third tab (index 2).""")
 def browser_close_tab(tab_index: int) -> str:
     return send_browser_request(Action.CLOSE_TAB, tab_index=tab_index)
 
@@ -242,24 +232,20 @@ def browser_new_tab(url: Optional[str] = None) -> str:
     return send_browser_request(Action.NEW_TAB, url=url)
 
 
-@tool(
-    description="""Navigates the current active tab to a new URL.
+@tool(description="""Navigates the current active tab to a new URL.
 
 Example:
     `browser_navigate(url="https://wikipedia.org")`
-    Redirects the current page to Wikipedia."""
-)
+    Redirects the current page to Wikipedia.""")
 def browser_navigate(url: str) -> str:
     return send_browser_request(Action.NAVIGATE, url=url)
 
 
-@tool(
-    description="""Sets the value of a slider (<input type="range">) element.
+@tool(description="""Sets the value of a slider (<input type="range">) element.
 
 Example:
     `browser_set_slider(element_id=7, value="50")`
-    Moves the slider at ID 7 to the 50 mark."""
-)
+    Moves the slider at ID 7 to the 50 mark.""")
 def browser_set_slider(element_id: int, value: str) -> str:
     return send_browser_request(Action.SET_SLIDER, element_id=element_id, value=value)
 
@@ -271,24 +257,7 @@ def browser_page_screenshot() -> Any:
     return send_browser_request(Action.PAGE_SCREENSHOT)
 
 
-@tool(
-    description="""Takes a screenshot of a specific element and returns it.
-
-# Example
-Browser dom:
-```
-Click the one that is a cat.
-[1] BUTTON (Image)
-[2] BUTTON (Image)
-[3] BUTTON (Image)
-[4] BUTTON (Image)
-```
-You would call browser_element_screenshot for each element on the same turn.
-`browser_element_screenshot(element_id=1)`
-`browser_element_screenshot(element_id=2)`
-`browser_element_screenshot(element_id=3)`
-`browser_element_screenshot(element_id=4)`"""
-)
+@tool(description="""Takes a screenshot of a specific element and returns it.""")
 def browser_element_screenshot(element_id: int) -> Any:
     return send_browser_request(Action.ELEMENT_SCREENSHOT, element_id=element_id)
 

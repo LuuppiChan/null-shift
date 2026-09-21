@@ -1,0 +1,3 @@
+socket_path = "tcp://127.0.0.1:5557"
+typing_delay_ms = 5
+typing_timeout_ms = 30_000

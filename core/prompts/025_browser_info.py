@@ -5,8 +5,9 @@ Definitions and Specifications: Provide clear, explicit, specific, and complete 
 from typing import Any
 
 import zmq
-from core.helpers import PromptHelper, xml_tag
+
 from core.core_data import data
+from core.helpers import PromptHelper, enforce_character_limit, xml_tag
 from global_types import BusMessage
 from tools.browser.message_types import Action
 
@@ -65,16 +66,23 @@ def browser_list_tabs() -> str:
     return send_browser_request(Action.LIST_TABS)
 
 
+def browser_get_dom(character_limit: int = 10000) -> str:
+    return enforce_character_limit(send_browser_request(Action.DOM), character_limit)
+
+
 def collect() -> str | None:
     try:
-        focused = [tab for tab in browser_list_tabs().split("\n") if "active" in tab]
-        if not focused:
-            return None
-
-        return xml_tag(
-            focused,
-            "currently_focused_browser_tab",
-            "Possibly the currently focused browser tab. To read the contents use the get DOM tool.",
+        prompt = PromptHelper(
+            "browse_context",
+            "This can partially replace the use of tools for them.",
         )
+        prompt.add_part(browser_list_tabs(), "browser_tabs")
+        # prompt.add_part(
+        #     browser_get_dom(),
+        #     "browser_dom",
+        #     "First 10000 characters of the currently open site. If this doesn't have any message at the end about being truncated, it's the full DOM.",
+        # )
+
+        return prompt.compile()
     except Exception as e:
-        print("Error indexing browser tabs.", e)
+        print("Error getting browser stuff.", e)

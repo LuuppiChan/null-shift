@@ -41,6 +41,7 @@ class ToolConfig(BaseModel):
     browser_dom_char_limit: int = 4000
     browser_confirm_tab_close: bool = False
     browser_confirm_close_tab_prompt: str = "Are you sure you want to close tab {}?"
+    brower_socket_timeout_ms: int = 30_000
 
     file_path_blacklist: list[str] = Field(default_factory=list)
     file_path_whitelist: list[str] = Field(default_factory=list)
