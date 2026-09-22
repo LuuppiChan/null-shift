@@ -16,6 +16,7 @@ from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
     HumanMessage,
+    HumanMessageChunk,
     ToolMessage,
     messages_from_dict,
 )
@@ -941,20 +942,27 @@ class Chat(ft.Container):
             history_dict: list[dict[str, Any]] = json.loads(history_path.read_text())
             history = messages_from_dict(history_dict)
             for msg in history:
-                if isinstance(msg, HumanMessage):
-                    text: str = ""
+                text: str = ""
+                if isinstance(msg, (HumanMessage, HumanMessageChunk)):
                     if isinstance(msg.content, list):
                         for item in msg.content:
-                            if isinstance(item, str):
-                                text += item
+                            if isinstance(item, dict):
+                                if item.get("type") == "text":
+                                    text += str(item.get("text", ""))
                             else:
-                                text += str(item.get("text"))
+                                text += item
                     else:
                         text += msg.content
+
+                    # if this isn't removed the markdown viewer detects the text as html
+                    # this can be fixed with a prefix or removing
+                    # for now just remove the context block.
+                    text = re.sub(
+                        r"<context>.*?</context>\n", "", text, flags=re.DOTALL
+                    )
                     self.add_message(Message.user(text))
                 elif isinstance(msg, (AIMessageChunk, AIMessage)):
-                    thoughts = ""
-                    text = ""
+                    thoughts: str = ""
                     if isinstance(msg.content, str):
                         text = msg.content
                     elif isinstance(msg.content, list):
