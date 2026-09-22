@@ -5,7 +5,6 @@ from typing import AsyncIterator, Optional
 from langchain_core.messages import AIMessage, BaseMessage
 from pydantic import BaseModel
 
-from core.backends.openrouter import OpenRouterBackend
 from core.config import ModelInfo, manager
 from core.registry import LLMTool
 
@@ -43,6 +42,7 @@ def get_backend(model: ModelInfo) -> LLMBackend:
     """
     from core.backends.litellm import LiteLLMBackend
     from core.backends.openai import OpenAIBackend
+    from core.backends.openrouter import OpenRouterBackend
     from core.backends.vertexai import VertexAIBackend
 
     logger = logging.getLogger(__name__)
