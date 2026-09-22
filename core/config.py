@@ -210,6 +210,19 @@ class PromptConfig(BaseModel):
     function_timeout: float = 0.5
 
 
+class DynamicContext(BaseModel):
+    """
+    Not to be confused with PromptConfig.
+    This one injects context to the current user message.
+    """
+    path: str = "context/"
+    recursive: bool = False
+    file_names: list[str] = [".py", ".md", ".xml"]
+    function_name: str = "collect"
+    function_timeout: float = 0.5
+    keep_context: bool = True
+
+
 class ToolHandlingConfig(BaseModel):
     path: str = "tools/"
     recursive: bool = False
@@ -257,6 +270,7 @@ class CoreConfig(BaseModel):
     tool_config: ToolHandlingConfig = Field(default_factory=ToolHandlingConfig)
     prompt_config: PromptConfig = Field(default_factory=PromptConfig)
     prompts: Prompts = Field(default_factory=Prompts)
+    dynamic_context: DynamicContext = Field(default_factory=DynamicContext)
     permissions: PermissionsConfig = Field(default_factory=PermissionsConfig)
     socket: SocketConfig = Field(default_factory=SocketConfig)
     log: LogConfig = Field(default_factory=LogConfig)

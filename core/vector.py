@@ -18,6 +18,7 @@ from core.backends import LLMBackend, get_backend
 from core.config import manager, state
 from core.context import get_context
 from core.core_data import LocalData
+from core.dynamic_context import get_dynamic_context
 from core.history import History
 from core.registry import LLMTool, get_tools
 from core.socket_system import socket_out
@@ -202,6 +203,11 @@ class Vector:
 
         content: list[str | dict[Any, Any]] = []
         formatted = []
+
+        dyn_ctx = await get_dynamic_context(self.data)
+        if dyn_ctx is not None:
+            formatted.append(dyn_ctx)
+
         if message.title:
             formatted.append("# " + message.title)
         formatted.append(message.body)
@@ -224,7 +230,8 @@ class Vector:
         self.data.agent.goal = message.goal
         self.data.agent.context = message.context
 
-        self.history.append(HumanMessage(content))
+        human_message = HumanMessage(content)
+        self.history.append(human_message)
         logger.info("USER: %s", text)
 
         i = 0
@@ -335,6 +342,14 @@ class Vector:
                 break
 
             i += 1
+
+        if (
+            not manager.get_config().dynamic_context.keep_context
+            and dyn_ctx is not None
+        ):
+            for block in human_message.content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    block["text"] = block["text"].replace(dyn_ctx, "").strip()
 
         self.history.save()
 
