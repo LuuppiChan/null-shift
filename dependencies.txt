@@ -1,7 +1,12 @@
 pyzmq
+# for openai backends
 langchain-openai
+# for google backends
 langchain-google-genai
+# for litellm backend
 langchain-litellm
+# for better openrouter support than openai backend
+langchain-openrouter
 langchain
 pydantic
 pyzmq

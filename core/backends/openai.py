@@ -47,10 +47,7 @@ class OpenAIBackend(LLMBackend):
             reasoning_effort=model.reasoning_effort if model.reasoning_effort else None,
             reasoning=model.reasoning,
             extra_body=model.extra_body if model.extra_body else None,
-            default_headers={
-                "X-Title": "Null Shift",
-                "HTTP-Referer": "https://github.com/LuuppiChan/null-shift"
-            },
+            default_headers=model.default_headers,
         )
 
     def stream(
