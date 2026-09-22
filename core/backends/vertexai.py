@@ -1,12 +1,13 @@
-from typing import AsyncIterator, Optional, cast
+from collections.abc import AsyncIterator
+from typing import cast
+
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from pydantic import BaseModel
 
 from core.backends import LLMBackend
-from core.config import ModelInfo
+from core.config import ModelInfo, manager
 from core.registry import LLMTool
-from core.config import manager
 
 
 class VertexAIBackend(LLMBackend):
@@ -28,14 +29,14 @@ class VertexAIBackend(LLMBackend):
             "max_tokens": model.max_tokens,
             "top_p": model.top_p,
             "vertexai": True,
-            **(cfg.model_extra or {})
+            **(cfg.model_extra or {}),
         }
 
         self.config = {k: v for k, v in self.config.items() if v is not None}
         self.llm: ChatGoogleGenerativeAI = ChatGoogleGenerativeAI(**self.config)
 
     def stream(
-        self, messages: list[BaseMessage], tools: Optional[list[LLMTool]]
+        self, messages: list[BaseMessage], tools: list[LLMTool] | None
     ) -> AsyncIterator[AIMessage]:
         if tools:
             return self.llm.bind_tools(tools).astream(messages)

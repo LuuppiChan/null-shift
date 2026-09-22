@@ -1,4 +1,5 @@
-from typing import Any, AsyncIterator, Mapping, Optional, cast
+from collections.abc import AsyncIterator, Mapping
+from typing import Any, cast
 
 # langchain discards reasoning tokens for some reason for openai backend
 # So here's a monke patch
@@ -9,7 +10,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 from core.backends import LLMBackend
-from core.config import CoreConfig, ModelInfo, manager
+from core.config import ModelInfo
 from core.registry import LLMTool
 
 _original_convert = openai_base._convert_delta_to_message_chunk
@@ -51,9 +52,7 @@ class OpenAIBackend(LLMBackend):
         )
 
     def stream(
-        self,
-        messages: list[BaseMessage],
-        tools: Optional[list[LLMTool]],
+        self, messages: list[BaseMessage], tools: list[LLMTool] | None
     ) -> AsyncIterator[AIMessage]:
         if tools:
             return self.llm.bind_tools(tools).astream(messages)

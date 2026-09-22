@@ -40,21 +40,25 @@ def get_backend(model: ModelInfo) -> LLMBackend:
     """
     Get LLM backend based on the current profile.
     """
-    from core.backends.litellm import LiteLLMBackend
-    from core.backends.openai import OpenAIBackend
-    from core.backends.openrouter import OpenRouterBackend
-    from core.backends.vertexai import VertexAIBackend
 
     logger = logging.getLogger(__name__)
 
     match model.provider:
         case "openai":
+            from core.backends.openai import OpenAIBackend
+
             return OpenAIBackend(model)
         case "vertexai":
+            from core.backends.vertexai import VertexAIBackend
+
             return VertexAIBackend(model)
         case "litellm":
+            from core.backends.litellm import LiteLLMBackend
+
             return LiteLLMBackend(model)
         case "openrouter":
+            from core.backends.openrouter import OpenRouterBackend
+
             return OpenRouterBackend(model)
 
     logger.error("Invalid back-end name, defaulting to OpenAI")

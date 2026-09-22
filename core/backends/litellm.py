@@ -1,4 +1,5 @@
-from typing import AsyncIterator, Optional, cast
+from collections.abc import AsyncIterator
+from typing import cast
 
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_litellm import ChatLiteLLM
@@ -31,7 +32,7 @@ class LiteLLMBackend(LLMBackend):
         )
 
     def stream(
-        self, messages: list[BaseMessage], tools: Optional[list[LLMTool]]
+        self, messages: list[BaseMessage], tools: list[LLMTool] | None
     ) -> AsyncIterator[AIMessage]:
         if tools:
             return self.llm.bind_tools(tools).astream(messages)
