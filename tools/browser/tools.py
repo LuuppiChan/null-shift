@@ -364,7 +364,9 @@ async def fill_input(
                     await locator.fill(text, timeout=config.typing_timeout_ms)
                 else:
                     await locator.press_sequentially(
-                        text, timeout=config.typing_timeout_ms
+                        text,
+                        timeout=config.typing_timeout_ms,
+                        delay=config.typing_delay_ms,
                     )
 
         if press_enter:
