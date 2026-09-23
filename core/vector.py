@@ -507,7 +507,7 @@ class Vector:
                 ).to_bus(MessageTopic.TOOL_CALL)
             )
 
-        tasks = []
+        results = []
 
         for tool_call in tool_calls:
             name = tool_call["name"]
@@ -524,9 +524,10 @@ class Vector:
 
             func = tools.get(name, inexistent)
 
-            tasks.append(self._handle_single_tool(func, args, call_id))
+            results.append(await self._handle_single_tool(func, args, call_id))
 
-        results = await asyncio.gather(*tasks)
+        # Before there were mulithreading, but for now I'll disable it because it doesn't bring that many benefits compared to the disadvantages it gives with model hallucination.
+        # results = await asyncio.gather(*tasks)
 
         for result in results:
             await socket_out.send(
