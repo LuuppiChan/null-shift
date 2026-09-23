@@ -1,17 +1,18 @@
-from dataclasses import dataclass, field
-from datetime import datetime
-import json
 import asyncio
+import json
 import logging
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Any, Literal, Optional
 from copy import deepcopy
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Literal, Optional
 
 import flet as ft
+import zmq.asyncio
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
@@ -20,14 +21,20 @@ from langchain_core.messages import (
     ToolMessage,
     messages_from_dict,
 )
-import zmq.asyncio
 
 from global_tools import Signal
-from global_types import BusMessage, Commands, Difficulty, InputMessage, MessageTopic
+from global_types import (
+    BusMessage,
+    Commands,
+    Difficulty,
+    InputMessage,
+    MessageTopic,
+    PendingPermissionRequest,
+)
+from gui.config import manager
 from gui.stt import Transcriber
 from gui.tts import TextToSpeech
 from output_message import OutputMessage
-from gui.config import manager
 
 logger = logging.getLogger(__name__)
 
@@ -523,10 +530,10 @@ class Message(ft.Container):
         msg = Message()
         msg.thoughts.title = f"Tool call: `{name}`"
         msg.thoughts.tooltip = (
-            f"Arguments:\njson\n{json.dumps(args, indent=4)[-cfg.tooltip_len :]}\n"
+            f"Arguments:\njson\n{json.dumps(args, indent=4, ensure_ascii=False)[-cfg.tooltip_len :]}\n"
         )
         msg.thoughts.visible = True
-        msg.tool_call.value = f"**Tool Name:** {name}\n\n**Arguments:**\n```json\n{json.dumps(args, indent=2)}\n```"
+        msg.tool_call.value = f"**Tool Name:** {name}\n\n**Arguments:**\n```json\n{json.dumps(args, indent=2, ensure_ascii=False)}\n```"
         msg.tool_call.visible = True
         msg.tool_name = name
         msg.tool_id = id
@@ -537,11 +544,50 @@ class Message(ft.Container):
         msg.space.visible = False
         return msg
 
+    @staticmethod
+    def permission_request(
+        request: PendingPermissionRequest, chat: "Chat"
+    ) -> "Message":
+        raise NotImplementedError
+
+        def send_response(allowed: bool):
+            pass
+
+        msg = Message.ai(request.title)
+        # I don't think I need details since it's a custom permission message.
+        # msg.thoughts.visible = True
+        msg.thoughts.title = "Details"
+        msg.thought_markdown.visible = True
+        msg.thought_markdown.value = f"{request.id=}\n"
+
+        assert isinstance(msg.content, ft.Column)
+        thoughts = msg.content.controls.pop(1)
+        text = msg.content.controls.pop(1)
+        dialog_buttons = ft.Column(
+            [
+                ft.Row(
+                    [
+                        ft.Button("Allow", on_click=lambda: send_response(True)),
+                        ft.Button("Deny", on_click=lambda: send_response(False)),
+                    ]
+                ),
+                ft.TextField(multiline=True, hint_text="Optional deny reason..."),
+            ]
+        )
+
+        msg.content.controls.insert(1, text)
+        msg.content.controls.insert(1, thoughts)
+        msg.content.controls.insert(1, dialog_buttons)
+        # this appends to the end, that we don't want.
+        # msg.content.controls.extend([text, dialog_buttons, thoughts])
+
+        return msg
+
     def add_tool_response(
         self, content: str | dict[str, Any] | list[dict[str, Any]] | list[str]
     ):
         if isinstance(content, (dict, list)):
-            content = json.dumps(content, indent=2)
+            content = json.dumps(content, indent=2, ensure_ascii=False)
             content = f"```json\n{content}\n```"
             self.tool_result = good_markdown()
 
@@ -758,7 +804,7 @@ class Chat(ft.Container):
             if not options["context"]:
                 del options["context"]
 
-            logger.info("%s", json.dumps(options, indent=2))
+            logger.info("%s", json.dumps(options, indent=2, ensure_ascii=False))
 
             if self.streaming and self.input.transcriber.running:
                 await sock_in.send_multipart(
@@ -803,9 +849,8 @@ class Chat(ft.Container):
                                 continue
 
                             self.append_last(out.text or "", out.reasoning or "")
-                            if out.text:
-                                if self.speaking_enabled():
-                                    self.tts.put_stream(out.text)
+                            if out.text and self.speaking_enabled():
+                                self.tts.put_stream(out.text)
 
                         case MessageTopic.TOOL_CALL:
                             out = OutputMessage.from_bus(msg)
@@ -875,6 +920,12 @@ class Chat(ft.Container):
                             cfg = manager.get_config()
                             if cfg.speak.audio_feedback and self.speaking_enabled():
                                 await self.tts.speak_single("Stream aborted.")
+                        case MessageTopic.FULL:
+                            # this is a good hook for message ending if needed later.
+                            pass
+                        case MessageTopic.PERMISSION_REQUEST:
+                            pass
+
                     self.update()
                 except Exception as e:
                     logger.error("Error while listening: %s", e, exc_info=True)

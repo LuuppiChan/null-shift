@@ -123,6 +123,7 @@ class PendingPermissionRequest(BaseModel):
     title: str = "Permission request"
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     accepted: bool | None = None
+    # Not for the AI, but it tries to extract a yes or no from the response.
     response_text: str | None = None
     decline_reason: str = "The request has been declined."
 
