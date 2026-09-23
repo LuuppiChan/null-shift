@@ -13,4 +13,4 @@ class BrowserConfig(BaseModel):
     typing_timeout_ms: float = 30_000
 
 
-manager = ConfigManager(Path("./browser_config.toml"), BrowserConfig())
+manager = ConfigManager(Path("./tools/browser/browser_config.toml"), BrowserConfig())
