@@ -98,8 +98,9 @@ def browser_click(element_id: int) -> str:
 
 
 @tool(
-    description="""Clears an input field or textarea and types the provided text into it.
+    description="""High level text typing tool.
 
+Clears an input field or textarea and types the provided text into it.
 Overwrite controls whether to set the field content or append to it.
 Works on any shown input fields on the DOM including Google docs.
 
