@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 
 from core.helpers import ask_ai, enforce_character_limit
+from core.config import tool_manager
 from global_types import BusMessage
 from tools.browser.message_types import Action
 
@@ -64,15 +65,19 @@ Example:
     Returns a string representation of the DOM with interactive elements tagged with their [ID].
 """
 )
-def browser_get_dom(character_limit: int = 10000) -> str:
+def browser_get_dom(
+    character_limit: int = tool_manager.get_config().browser_dom_char_limit,
+) -> str:
     return enforce_character_limit(send_browser_request(Action.DOM), character_limit)
 
 
-@tool(description="""Return an AI summary of the current page.
+@tool(
+    description="""Return an AI summary of the current page.
 An economical convenience tool to prevent token wasting.
 Use this for page overviews and other simple questions about the page.
 You can ask any question about the currently focused website.
-Note that the model doesn't have any external context besides the DOM and instructions to summarize web pages.""")
+Note that the model doesn't have any external context besides the DOM and instructions to summarize web pages."""
+)
 def browser_page_summary(message: str = "Summarize the contents of this page") -> str:
     return asyncio.run(
         ask_ai(
@@ -97,8 +102,7 @@ def browser_click(element_id: int) -> str:
     return send_browser_request(Action.CLICK, element_id=element_id)
 
 
-@tool(
-    description="""High level text typing tool.
+@tool(description="""High level text typing tool.
 
 Clears an input field or textarea and types the provided text into it.
 Overwrite controls whether to set the field content or append to it.
@@ -106,8 +110,7 @@ Works on any shown input fields on the DOM including Google docs.
 
 Example:
     `browser_type(element_id=4, text="search query", press_enter=True)`
-    Types "search query" into input [4] and automatically submits by pressing Enter."""
-)
+    Types "search query" into input [4] and automatically submits by pressing Enter.""")
 def browser_type(
     element_id: int, text: str, press_enter: bool = False, overwrite: bool = True
 ) -> str:
