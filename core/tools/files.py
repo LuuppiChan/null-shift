@@ -204,30 +204,39 @@ def _file_read(
         if video is None:
             content_list.append(
                 {
+                    "type": "text",
                     "text": _enforce_character_limit(
                         "Failed to read video.", character_limit
-                    )
+                    ),
                 }
             )
         else:
             content_list.append(
                 {
-                    "type": "file",
-                    "source_type": "base64",
-                    "data": video,
-                    "mime_type": "video/mp4",
+                    # apparently legacy
+                    #     "type": "file",
+                    #     "source_type": "base64",
+                    #     "data": video,
+                    #     "mime_type": "video/mp4",
+                    # and this apparently doesn't just work because of langchain
+                    "type": "video_url",
+                    "video_url": {"url": f"data:video/mp4;base64,{video}"},
                 }
             )
             if media_start is not None or media_end is not None:
                 desc = _build_media_range_desc(media_start, media_end)
                 content_list.append(
                     {
-                        "text": f"The video segment ({desc}) has been attached to this message."
+                        "type": "text",
+                        "text": f"The video segment ({desc}) has been attached to this message.",
                     }
                 )
             else:
                 content_list.append(
-                    {"text": "The video has been attached to this message."}
+                    {
+                        "type": "text",
+                        "text": "The video has been attached to this message.",
+                    }
                 )
     elif mime.startswith("audio/"):
         audio = compress_audio(path, start=media_start, end=media_end)
@@ -242,22 +251,24 @@ def _file_read(
         else:
             content_list.append(
                 {
-                    "type": "file",
-                    "source_type": "base64",
-                    "data": audio,
-                    "mime_type": "audio/aac",
+                    "type": "input_audio",
+                    "input_audio": {"data": audio, "format": "mp3"},
                 }
             )
             if media_start is not None or media_end is not None:
                 desc = _build_media_range_desc(media_start, media_end)
                 content_list.append(
                     {
-                        "text": f"The audio segment ({desc}) has been attached to this message."
+                        "type": "text",
+                        "text": f"The audio segment ({desc}) has been attached to this message.",
                     }
                 )
             else:
                 content_list.append(
-                    {"text": "The audio has been attached to this message."}
+                    {
+                        "type": "text",
+                        "text": "The audio has been attached to this message.",
+                    }
                 )
     elif mime == "application/pdf":
         # Just send to the content is as base64 as-is
@@ -294,7 +305,10 @@ def _file_read(
                 text = lines[start_line:end_line]
 
             content_list.append(
-                {"text": _enforce_character_limit("\n".join(text), character_limit)}
+                {
+                    "type": "text",
+                    "text": _enforce_character_limit("\n".join(text), character_limit),
+                }
             )
     else:
         is_text = True
@@ -324,8 +338,7 @@ def _file_read(
     return content_list
 
 
-@tool(
-    description="""Primary file reading tool.
+@tool(description="""Primary file reading tool.
 Reads files with line-range support.
 Handles both text and binary files, with automatic encoding detection.
 Respects permission boundaries.
@@ -349,8 +362,7 @@ Args:
     start_line: Optional line to start the read at. Starts at the first line if not specified. (1-indexed)
     end_line: Optional line to end the read at. Reads to the end if not specified. (exclusive)
     character_limit: Max character limit. None means default max character limit.
-    show_line_numbers: Show line numbers when reading text."""
-)
+    show_line_numbers: Show line numbers when reading text.""")
 def file_read(
     file_path: str | Artifacts,
     start_line: Optional[int | float] = None,
@@ -363,13 +375,11 @@ def file_read(
     )
 
 
-@tool(
-    description="""Return an AI summary of the given file.
+@tool(description="""Return an AI summary of the given file.
 **Text file only!**
 An economical convenience tool to prevent token wasting.
 Internally just feeds the text file and the `message` parameter to an AI model.
-You can ask any question about the file."""
-)
+You can ask any question about the file.""")
 def file_summary(
     file_path: str | Artifacts,
     start_line: Optional[int | float] = None,
@@ -416,8 +426,7 @@ If you need more context for the question ask the agent to see a different part 
     )
 
 
-@tool(
-    description="""Make targeted edits to existing files using search and replace.
+@tool(description="""Make targeted edits to existing files using search and replace.
 Uses exact string matching to locate edit targets.
 Args:
     file_path: Absolute path to the file or an artifact name.
@@ -427,8 +436,7 @@ Args:
     end_line: End of the search range (inclusive).
     allow_multiple: If True, replaces all occurrences in range. If False, errors if multiple found.
 Returns:
-    str: Confirmation or error details."""
-)
+    str: Confirmation or error details.""")
 def file_edit(
     file_path: str | Artifacts,
     target_content: str,
@@ -481,14 +489,12 @@ def file_edit(
         return _enforce_character_limit(f"Error editing file: {e}")
 
 
-@tool(
-    description="""Writes or appends content to a file.
+@tool(description="""Writes or appends content to a file.
 Also can be used to delete files and directories by giving a path to them and writing an empty string.
 Args:
     file_path: Absolute path to the file or an artifact name. If the last character is a `/` it's considered a folder and will be created.
     content: The text to write. An empty string means to delete the file.
-    overwrite: If True, replaces content. If False, appends."""
-)
+    overwrite: If True, replaces content. If False, appends.""")
 def file_write(
     file_path: str | Artifacts, content: str, overwrite: bool = False
 ) -> str:
@@ -526,15 +532,13 @@ def file_write(
         return _enforce_character_limit(f"Error writing to file: {e}")
 
 
-@tool(
-    description="""Find files matching a glob pattern across the system.
+@tool(description="""Find files matching a glob pattern across the system.
 Searches the workspace using glob patterns (e.g., ~/some/project/**/*.md).
 
 Args:
     pattern: Glob pattern
     file_path: Absolute path to the directory to start the glob search from, or an artifact name.
-    case_sensitive: Whether the globbing is case sensitive or not."""
-)
+    case_sensitive: Whether the globbing is case sensitive or not.""")
 def file_glob(
     pattern: str, file_path: str | Artifacts, case_sensitive: bool = False
 ) -> str:
@@ -580,8 +584,7 @@ def file_glob(
         return _enforce_character_limit(f"Error globbing files: {e}")
 
 
-@tool(
-    description="""Search file contents using regular expressions.
+@tool(description="""Search file contents using regular expressions.
 Performs regex search across files in the workspace.
 Returns matching lines with file paths and line numbers.
 Supports case-insensitive and include/exclude patterns.
@@ -591,8 +594,7 @@ Args:
     file_path: Absolute path to the directory to start the grep search from, or an artifact name.
     include: Optional glob pattern to include files (e.g., "*.py", "**/*.js"). If not specified, all files are considered.
     exclude: Optional glob pattern to exclude files. Exclude takes precedence over include.
-    ignore_case: If true, the search will be case-insensitive."""
-)
+    ignore_case: If true, the search will be case-insensitive.""")
 def file_grep(
     pattern: str,
     file_path: str | Artifacts,
