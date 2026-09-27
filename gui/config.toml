@@ -15,7 +15,7 @@ audio_feedback = true
 context_injection = """Your response is streamed to a text-to-speech model. Output short and conversational answers.
 Code blocks and LaTex blocks are filtered out of the spoken answer. Other markdown features are forbidden.
 You must respond to the user with only the supported languages.
-The current text-to-speech model supports the following languages only: English"""
+The current text-to-speech model supports only the following languages: English"""
 
 # applied to a sentence.
 # Supports regex
