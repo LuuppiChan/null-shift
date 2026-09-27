@@ -48,7 +48,7 @@ class OpenAIBackend(LLMBackend):
             reasoning_effort=model.reasoning_effort if model.reasoning_effort else None,
             reasoning=model.reasoning,
             extra_body=model.extra_body if model.extra_body else None,
-            default_headers=model.default_headers,
+            default_headers=(model.default_headers or {}) | (model.extra_headers or {}),
         )
 
     def stream(

@@ -29,7 +29,7 @@ class OpenRouterBackend(LLMBackend):
             presence_penalty=model.presence_penalty,
             frequency_penalty=model.frequency_penalty,
             max_tokens=model.max_tokens,
-            default_headers=model.default_headers,
+            default_headers=(model.default_headers or {}) | (model.extra_headers or {}),
             model_kwargs=model.extra_body or {},
             openrouter_provider=model.openrouter_provider,
         )

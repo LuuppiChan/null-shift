@@ -43,6 +43,10 @@ def get_backend(model: ModelInfo) -> LLMBackend:
 
     logger = logging.getLogger(__name__)
 
+    api_key_set = "set" if model.api_key is not None else "unset"
+
+    logger.debug("Getting model info with the following dict (excluding api key which is %s): %s", api_key_set, repr(model))
+
     match model.provider:
         case "openai":
             from core.backends.openai import OpenAIBackend
@@ -62,4 +66,6 @@ def get_backend(model: ModelInfo) -> LLMBackend:
             return OpenRouterBackend(model)
 
     logger.error("Invalid back-end name, defaulting to OpenAI")
+    from core.backends.openai import OpenAIBackend
+
     return OpenAIBackend(model)

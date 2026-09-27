@@ -7,7 +7,7 @@ Additionally contains runtime state.
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -38,7 +38,7 @@ class ToolConfig(BaseModel):
     browser_website_blacklist: list[str] = Field(default_factory=list)
     browser_website_whitelist: list[str] = Field(default_factory=list)
     browser_require_confirmation_on_untrusted_navigation: bool = False
-    browser_dom_char_limit: int = 4000
+    browser_dom_char_limit: int = 100_000
     browser_confirm_tab_close: bool = False
     browser_confirm_close_tab_prompt: str = "Are you sure you want to close tab {}?"
     brower_socket_timeout_ms: int = 30_000
@@ -98,18 +98,19 @@ class ModelInfo(BaseModel):
     # litellm fuckshit
     provider: Literal["openai", "vertexai", "litellm", "openrouter"] | str | None = None
     url: str | None = None
-    api_key: str | None = None
+    api_key: str | None = Field(default=None, repr=False)
     name: str = ""
     reasoning_effort: str | None = None
     reasoning: dict[str, Any] | None = None
-    temperature: Optional[float] = Field(default=None, ge=0)
-    top_p: Optional[float] = Field(default=None, ge=0, le=1)
-    presence_penalty: Optional[float] = Field(default=None, ge=-2, le=2)
-    frequency_penalty: Optional[float] = Field(default=None, ge=-2, le=2)
-    max_tokens: Optional[int] = None
-    extra_body: Optional[dict[str, Any]] = None
-    openrouter_provider: Optional[dict[str, Any]] = None
-    default_headers: Optional[dict[str, str]] = Field(
+    temperature: float | None = Field(default=None, ge=0)
+    top_p: float | None = Field(default=None, ge=0, le=1)
+    presence_penalty: float | None = Field(default=None, ge=-2, le=2)
+    frequency_penalty: float | None = Field(default=None, ge=-2, le=2)
+    max_tokens: int | None = None
+    extra_body: dict[str, Any] | None = None
+    openrouter_provider: dict[str, Any] | None = None
+    extra_headers: dict[str, str] | None = None
+    default_headers: dict[str, str] | None = Field(
         default_factory=lambda: {
             "X-Title": "Null Shift",
             "HTTP-Referer": "https://github.com/LuuppiChan/null-shift",
@@ -117,12 +118,17 @@ class ModelInfo(BaseModel):
     )
 
     def with_overrides(self, other: "ModelInfo") -> "ModelInfo":
-        return self.model_copy(
-            update=other.model_dump(
-                exclude_defaults=True, exclude_none=True, exclude_unset=True
-            ),
-            deep=True,
+        overrides = other.model_dump(
+            exclude_defaults=True, exclude_none=True, exclude_unset=True
         )
+
+        if not overrides:
+            return self.model_copy(deep=True)
+
+        data = self.model_dump(
+            exclude_defaults=True, exclude_none=True, exclude_unset=True
+        )
+        return ModelInfo.model_validate(data | overrides)
 
     def get_api_key(self) -> str | None:
         # code must start with '# API_KEY <-'
@@ -158,7 +164,7 @@ class LLM(BaseModel):
     vertexai_project_id: str = ""
     vertexai_location: str = "global"
 
-    litellm_provider: Optional[str] = None
+    litellm_provider: str | None = None
 
     models: TaskModels = Field(default_factory=TaskModels)
 
@@ -291,21 +297,22 @@ class CoreConfig(BaseModel):
 
     def get_model(self, identifier: ModelIdentifier) -> ModelInfo:
         """Get model based on identifier."""
+        base = self.llm.default
         if model := self.llm.model_tiers.get(self.llm.default.name):
-            self.llm.default = model
+            base = model
 
         if isinstance(identifier, ModelInfo):
             if identifier.name in self.llm.model_tiers:
-                return self.llm.default.with_overrides(
+                return base.with_overrides(
                     self.llm.model_tiers[identifier.name]
                 )
-            return self.llm.default.with_overrides(identifier)
+            return base.with_overrides(identifier)
         elif identifier is None:
-            return self.llm.default
+            return base
         elif model := self.llm.model_tiers.get(identifier):
-            return model
+            return base.with_overrides(model)
 
-        return self.llm.default.with_overrides(ModelInfo(name=identifier))
+        return base.with_overrides(ModelInfo(name=identifier))
 
 
 class RuntimeState(BaseModel):
