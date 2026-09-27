@@ -9,6 +9,7 @@ from langchain_core.messages import (
     HumanMessage,
     ToolCall,
     ToolMessage,
+    ToolMessageChunk,
 )
 from langchain_core.tools import tool
 from pydantic import ValidationError
@@ -547,6 +548,10 @@ class Vector:
         try:
             output = await asyncio.to_thread(lambda: func.run(args))
             # There's an argument called 'artifact' which is a system context field not sent to the LLM.
+
+            # Add support for the tools to give out raw tool messages
+            if isinstance(output, (ToolMessage)):
+                return output
             return ToolMessage(content=output, tool_call_id=call_id, name=func.name)
         except Exception as e:
             logger.error("Error executing tool '%s': %s", func.name, e)
