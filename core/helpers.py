@@ -14,7 +14,6 @@ import numpy as np
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
-    BaseMessageChunk,
     HumanMessage,
     SystemMessage,
 )
@@ -332,7 +331,7 @@ def compress_audio(
 ) -> Optional[str]:
     """
     Returns a compressed base64 string of an audio.
-    Mime type is 'audio/aac'
+    Mime type is 'audio/mp3'
     Returns None if ffmpeg didn't write anything or returned a non-zero code.
 
     start and end are timestamps in seconds.  When both are provided
@@ -351,7 +350,7 @@ def compress_audio(
     elif end is not None:
         trim_flags_post.extend(["-to", str(end)])
 
-    with tempfile.NamedTemporaryFile(suffix=".aac") as temp_file:
+    with tempfile.NamedTemporaryFile(suffix=".mp3") as temp_file:
         cmd = [
             "ffmpeg",
             "-y",
