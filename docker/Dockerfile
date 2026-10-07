@@ -7,7 +7,7 @@ USER agentuser
 WORKDIR /home/agentuser
 
 # Install required external modules
-RUN pip install --no-cache-dir numpy pandas requests scipy sympy pydantic
+RUN pip install --no-cache-dir numpy pandas requests scipy sympy pydantic matplotlib
 
 # Set the entrypoint to python
 ENTRYPOINT ["python", "-c"]

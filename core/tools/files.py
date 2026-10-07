@@ -315,7 +315,7 @@ def _file_read(
         # if mime.startswith("text/") or any([mime.startswith(t) for t in SAFE_APP_TYPES]):
         if show_line_numbers:
             lines = [
-                f"{i + 1}" + line
+                f"{i + 1} " + line
                 for i, line in enumerate(path.read_text(errors="replace").splitlines())
             ]
         else:

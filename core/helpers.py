@@ -177,11 +177,21 @@ def xml_tag(content: str | Any, tag: str, description: str = "") -> str:
     return f"<{tag}{f' description="{description}"' if description else ''}>\n{content}\n</{tag}>"
 
 
-def enforce_character_limit(text: str, limit: int | None = None) -> str:
-    """Enforce character limit on text outputs."""
+def enforce_character_limit(text: str, limit: int | None = None, start: int | None = None) -> str:
+    """
+    Enforce character limit on text outputs.
+    Optionally select the start character.
+    """
+    logger = logging.getLogger("enforce_character_limit")
     if limit is None:
         cfg = tool_manager.get_config()
         limit = cfg.file_absurd_size_limit
+    
+    if start:
+        if start >= 0:
+            text = f"(Collapsed {start} characters) ..." + text[start:]
+        else:
+            logger.error("Start is less than zero: %s", start)
 
     if limit <= 0:
         return text

@@ -28,6 +28,8 @@ asmr = 'A S M R'
 '(?:\#)' = ''
 
 [speak.piper]
+# model = "models/piper/fi_FI-harri-medium.onnx"
+# config = "models/piper/fi_FI-harri-medium.onnx.json"
 model = "models/piper/en_GB-northern_english_male-medium.onnx"
 config = "models/piper/en_GB-northern_english_male-medium.onnx.json"
 cuda = false
