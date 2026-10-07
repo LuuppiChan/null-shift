@@ -15,3 +15,4 @@ tools.md
 /models/*
 /loop_bench/
 /plans/
+/tools/browser/browser_config.toml

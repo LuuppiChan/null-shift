@@ -26,6 +26,7 @@ from tools.browser.tools import (
     extract_attribute,
     fill_input,
     get_agent_dom,
+    hide_sequences,
     hover_element,
     page_javascript,
     press_keyboard_key,
@@ -165,7 +166,7 @@ class BrowserControl:
                         active = await self.active_page()
                         for i, p in enumerate(self.ctx.pages):
                             try:
-                                title = await p.title()
+                                title = hide_sequences(await p.title())
                             except Exception:
                                 title = "Error"
                             tabs.append(

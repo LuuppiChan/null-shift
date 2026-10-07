@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from global_tools import ConfigManager
 
@@ -11,6 +11,8 @@ class BrowserConfig(BaseModel):
     socket_path: str = "tcp://127.0.0.1:5557"
     typing_delay_ms: float = 5
     typing_timeout_ms: float = 30_000
+
+    replace_b64_strings: list[list[str]] = Field(default_factory=list)
 
 
 manager = ConfigManager(Path("./tools/browser/browser_config.toml"), BrowserConfig())

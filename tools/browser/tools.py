@@ -1,11 +1,27 @@
+# Contains the actual browser tool implementations.
+# The tool definitions don't live here.
 import asyncio
 import base64
-from typing import Any, Optional
+from typing import Any
 
 import cv2
 import numpy as np
-from tools.browser.config import manager
 from playwright.async_api import Page
+
+from tools.browser.config import manager
+
+
+def hide_sequences(text: str) -> str:
+    """Hide possibly sensitive strings based on the config."""
+    for s in manager.get_config().replace_b64_strings:
+        try:
+            text = text.replace(
+                base64.b64decode(s[0]).decode(errors="replace"),
+                base64.b64decode(s[1]).decode(errors="replace"),
+            )
+        except IndexError:
+            pass
+    return text
 
 
 def compress_image_buffer(base64_str: str, quality: int = 50) -> str:
@@ -68,8 +84,25 @@ async def get_agent_dom(page: Page):
         if not docs_text.strip():
             docs_text = "(Document appears empty or text is entirely canvas-rendered and unreadable)"
 
-    agent_text = await page.evaluate(r"""() => {
+    agent_text: str = await page.evaluate(r"""() => {
+        document.querySelectorAll('[data-agent-id]').forEach(el => el.removeAttribute('data-agent-id'));
+        const activeEl = document.activeElement;
+
         let idCounter = 1;
+
+        const isReactInteractive = (node) => {
+            const propsKey = Object.keys(node).find(k => k.startsWith('__reactProps$'));
+            if (!propsKey) return false;
+            const p = node[propsKey];
+            // Only direct click handlers. onKeyDown-only = widget wrapper, onSubmit = form
+            // container (tagging those would suppress IDs of everything inside).
+            const meaningful = ['onClick', 'onMouseDown'];
+            if (!meaningful.some(k => typeof p?.[k] === 'function')) return false;
+            // Skip huge containers that happen to carry onClick (whole-panel wrappers);
+            // real controls have short labels.
+            const text = (node.innerText || '').replace(/\s+/g, ' ').trim();
+            return text.length <= 300;
+        };
 
         const processNode = (node, hasInteractiveParent = false, inheritedRole = '', isInsideRichText = false) => {
             if (node.nodeType === Node.TEXT_NODE) {
@@ -116,6 +149,8 @@ async def get_agent_dom(page: Page):
                 }
                 else if (['a', 'button', 'input', 'select', 'textarea', 'img', 'video'].includes(tag)) isInt = true;
                 else if (node.hasAttribute('onclick') || node.getAttribute('role') === 'button') isInt = true;
+                // React detection: handlers live in __reactProps$* expando properties, not DOM attributes
+                else if (isReactInteractive(node)) isInt = true;
                 else if (node.isContentEditable || node.getAttribute('role') === 'textbox') {
                     isInt = true;
                     isRichText = true;
@@ -129,8 +164,13 @@ async def get_agent_dom(page: Page):
                 }
 
                 if (isInt) {
-                    const rect = node.getBoundingClientRect();
-                    if (rect.width === 0 || rect.height === 0) isInt = false;
+                    const childInteractive = Array.from(node.children || []).some(c => {
+                        const pk = Object.keys(c).find(k => k.startsWith('__reactProps$'));
+                        if (!pk) return false;
+                        const p = c[pk];
+                        return typeof p?.onClick === 'function' || typeof p?.onMouseDown === 'function';
+                    });
+                    if (childInteractive) isInt = false; // recurse into children instead
                 }
             } catch (e) {
                 isInt = false;
@@ -181,68 +221,124 @@ async def get_agent_dom(page: Page):
 
             if (isInt && !hasInteractiveParent) {
                 try {
-                    let currentId = idCounter++;
-                    node.setAttribute('data-agent-id', currentId);
+                    const render = () => {
+                        let currentId = idCounter++;
+                        node.setAttribute('data-agent-id', currentId);
 
-                    if (isDocsEditor) {
-                         return ` [${currentId}] GOOGLE_DOCS_EDITOR `;
-                    }
-
-                    let label = combinedText.trim();
-                    if (!label) {
-                        label = node.getAttribute('aria-label') || node.getAttribute('title') || node.name || "";
-                    }
-
-                    if (tag === 'select') {
-                        let options = Array.from(node.options).map(opt => opt.text).join(", ");
-                        let val = node.options[node.selectedIndex]?.text || "";
-                        return ` [${currentId}] SELECT (value: "${val}", options: [${options}]) `;
-                    }
-                    else if (tag === 'input' || tag === 'textarea') {
-                        let type = (node.type || "text").toLowerCase();
-                        let val = node.value || node.placeholder || label || "";
-                        if (['submit', 'button', 'reset', 'image'].includes(type)) {
-                            val = val || "Submit";
-                            return ` [${currentId}] BUTTON (${val}) `;
-                        } else if (type === "checkbox" || type === "radio") {
-                            let checked = node.checked ? "[x]" : "[ ]";
-                            return ` [${currentId}] ${checked} ${type} ${val} `;
-                        } else if (type === "range") {
-                            let min = node.min || "0";
-                            let max = node.max || "100";
-                            return ` [${currentId}] SLIDER (value: "${val}", min: "${min}", max: "${max}") `;
-                        } else {
-                            return ` [${currentId}] INPUT_FIELD (value: "${val}") `;
+                        if (isDocsEditor) {
+                             return ` [${currentId}] GOOGLE_DOCS_EDITOR `;
                         }
-                    }
-                    else if (isRichText) {
-                        let val = node.textContent.substring(0, 1000).replace(/\s+/g, ' ').trim() || label || "";
-                        if (node.textContent.length > 1000) val += "...";
 
-                        if (combinedText.match(/\[\d+\]/)) {
-                            return ` [${currentId}] RICH_TEXT_EDITOR (value: "${val}") ${combinedText}`;
+                        let label = combinedText.trim();
+                        if (!label) {
+                            label = node.getAttribute('aria-label') || node.getAttribute('title') || node.name || "";
                         }
-                        return ` [${currentId}] RICH_TEXT_EDITOR (value: "${val}") `;
-                    }
-                    else if (currentRole === 'link') {
-                        return ` [${currentId}] LINK (${label || "Unlabeled"}) `;
-                    }
-                    else if (currentRole === 'image') {
-                        if (isInsideRichText) {
-                            return ` [${currentId}] RICH_TEXT_IMAGE (${label || "Unlabeled"}) `;
+
+                        if (tag === 'select') {
+                            let options = Array.from(node.options).map(opt => opt.text).join(", ");
+                            let val = node.options[node.selectedIndex]?.text || "";
+                            return ` [${currentId}] SELECT (value: "${val}", options: [${options}]) `;
                         }
-                        return ` [${currentId}] IMAGE (${label || "Unlabeled"}) `;
+                        else if (
+                            node.getAttribute('role') === 'combobox' ||
+                            ['listbox', 'menu', 'tree', 'grid', 'dialog', 'true'].includes(node.getAttribute('aria-haspopup')) ||
+                            (typeof node.className === 'string' &&
+                             /select__control|combobox|autocomplete|dropdown/i.test(node.className))
+                        ) {
+                            let expanded = node.getAttribute('aria-expanded');
+
+                            // Collect options
+                            let options = [];
+                            try {
+                                // react-select: options live in the component's props, climb the fiber tree
+                                let fk = Object.keys(node).find(k => k.startsWith('__reactFiber$'));
+                                if (fk) {
+                                    let flatten = (arr) => arr.forEach(o => {
+                                        if (o && Array.isArray(o.options)) flatten(o.options); // grouped options
+                                        else {
+                                            let text = (typeof o === 'string' ? o : String(o?.label ?? o?.value ?? ""))
+                                                .replace(/\s+/g, " ").trim();
+                                            options.push('"' + text + '"');
+                                        }
+                                    });
+                                    for (let f = node[fk]; f; f = f.return) {
+                                        let p = f.memoizedProps;
+                                        if (p && Array.isArray(p.options) && p.options.length &&
+                                            p.options.every(o => o && (typeof o === 'string' || o.label !== undefined || o.value !== undefined))) {
+                                            flatten(p.options);
+                                            break;
+                                        }
+                                    }
+                                }
+                            } catch (e) {}
+                            // Fallback: options actually rendered in the DOM (open menus / custom dropdowns)
+                            if (!options.length && expanded === 'true') {
+                                let listboxId = node.getAttribute('aria-owns') || node.getAttribute('aria-controls');
+                                let opts = listboxId
+                                    ? document.querySelectorAll(`#${CSS.escape(listboxId)} [role="option"]`)
+                                    : document.querySelectorAll('[role="listbox"] [role="option"]');
+                                options = Array.from(opts).map(o => '"' + o.textContent.replace(/\s+/g, " ").trim() + '"');
+                            }
+
+                            // Current value: react-select renders it as single-value or placeholder
+                            let val = (node.querySelector('[class*="singleValue"], [class*="placeholder"]')?.textContent
+                                || node.textContent).replace(/\s+/g, " ").trim();
+
+                            let optsStr = options.length ? `, options: [${options.join(", ")}]` : "";
+                            let expStr = expanded !== null ? ` [${expanded === 'true' ? 'open' : 'closed'}]` : "";
+                            return ` [${currentId}] DROPDOWN (${val}${expStr}${optsStr}) `;
+                        }
+                        else if (tag === 'input' || tag === 'textarea') {
+                            let type = (node.type || "text").toLowerCase();
+                            let val = node.value || node.placeholder || label || "";
+                            if (['submit', 'button', 'reset', 'image'].includes(type)) {
+                                val = val || "Submit";
+                                return ` [${currentId}] BUTTON (${val}) `;
+                            } else if (type === "checkbox" || type === "radio") {
+                                let checked = node.checked ? "[x]" : "[ ]";
+                                return ` [${currentId}] ${checked} ${type} ${val} `;
+                            } else if (type === "range") {
+                                let min = node.min || "0";
+                                let max = node.max || "100";
+                                return ` [${currentId}] SLIDER (value: "${val}", min: "${min}", max: "${max}") `;
+                            } else {
+                                return ` [${currentId}] INPUT_FIELD (value: "${val}") `;
+                            }
+                        }
+                        else if (isRichText) {
+                            let val = node.textContent.substring(0, 1000).replace(/\s+/g, ' ').trim() || label || "";
+                            if (node.textContent.length > 1000) val += "...";
+
+                            if (combinedText.match(/\[\d+\]/)) {
+                                return ` [${currentId}] RICH_TEXT_EDITOR (value: "${val}") ${combinedText}`;
+                            }
+                            return ` [${currentId}] RICH_TEXT_EDITOR (value: "${val}") `;
+                        }
+                        else if (currentRole === 'link') {
+                            return ` [${currentId}] LINK (${label || "Unlabeled"}) `;
+                        }
+                        else if (currentRole === 'image') {
+                            if (isInsideRichText) {
+                                return ` [${currentId}] RICH_TEXT_IMAGE (${label || "Unlabeled"}) `;
+                            }
+                            return ` [${currentId}] IMAGE (${label || "Unlabeled"}) `;
+                        }
+                        // 4. Explicitly format the Video output for the LLM
+                        else if (currentRole === 'video') {
+                            let paused = node.paused ? "Paused" : "Playing";
+                            let time = Math.floor(node.currentTime || 0);
+                            let duration = Math.floor(node.duration || 0);
+                            return ` [${currentId}] VIDEO (${paused}, ${time}s / ${duration}s) `;
+                        }
+                        else {
+                            return ` [${currentId}] BUTTON (${label || "Unlabeled"}) `;
+                        }
+                    };
+                    let rendered = render();
+                    if (node === activeEl) {
+                        rendered = rendered.replace(/\[(\d+)\]/, '[$1] FOCUSED:');
                     }
-                    // 4. Explicitly format the Video output for the LLM
-                    else if (currentRole === 'video') {
-                        let paused = node.paused ? "Paused" : "Playing";
-                        let time = Math.floor(node.currentTime || 0);
-                        let duration = Math.floor(node.duration || 0);
-                        return ` [${currentId}] VIDEO (${paused}, ${time}s / ${duration}s) `;
-                    }
-                    else {
-                        return ` [${currentId}] BUTTON (${label || "Unlabeled"}) `;
-                    }
+                    return rendered;
                 } catch (e) {}
             }
 
@@ -264,6 +360,7 @@ async def get_agent_dom(page: Page):
         let rawText = processNode(document.body);
         return rawText.replace(/\n\s*\n/g, '\n').trim();
     }""")
+    agent_text = hide_sequences(agent_text)
 
     if is_google_docs:
         return f"{agent_text}\n\n[Google Docs Content]\n{docs_text}\n[/Google Docs Content]"
@@ -274,12 +371,21 @@ async def _get_locator(page: Page, element_id: int):
     """Finds an element across the main page and all iframes."""
     selector = f'[data-agent-id="{element_id}"]'
     for frame in page.frames:
-        loc = frame.locator(selector).first
+        loc = frame.locator(selector)
         try:
-            if await loc.count() > 0:
-                return loc
+            n = await loc.count()
         except Exception:
-            pass
+            continue
+        if n == 0:
+            continue
+        for i in range(n):
+            candidate = loc.nth(i)
+            try:
+                if await candidate.is_visible():
+                    return candidate
+            except Exception:
+                continue
+        return loc.first  # fallback: all matches hidden
     return page.locator(selector).first
 
 
@@ -374,11 +480,9 @@ async def fill_input(
                 await page.keyboard.press("Enter")
             else:
                 await locator.press("Enter")
-            return (
-                f"Success: Typed '{text}' into element {element_id} and pressed Enter."
-            )
+            return f"Success: Typed given text into element {element_id} and pressed Enter."
 
-        return f"Success: Typed '{text}' into element {element_id}."
+        return f"Success: Typed given text into element {element_id}."
 
     except Exception as e:
         return f"Error: Failed to type into element {element_id}. Details: {str(e)}"
@@ -505,16 +609,44 @@ async def execute_misc_action(page: Page, element_id: int, action_event: str) ->
 async def select_combo_option(page: Page, element_id: int, option_value: str) -> str:
     """Selects an option in a combo box (<select> element)."""
     locator = await _get_locator(page, element_id)
+
+    # Native <select>: use Playwright's native support
     try:
-        await locator.select_option(label=option_value, timeout=3000)
-        return f"Success: Selected option '{option_value}' in element {element_id}."
+        tag = await locator.evaluate("el => el.tagName.toLowerCase()", timeout=3000)
+        if tag == "select":
+            try:
+                await locator.select_option(label=option_value, timeout=3000)
+                return f"Success: Selected option '{option_value}' in element {element_id}."
+            except Exception:
+                await locator.select_option(value=option_value, timeout=3000)
+                return f"Success: Selected option '{option_value}' in element {element_id}."
     except Exception:
-        try:
-            # Fallback to selecting by value
-            await locator.select_option(value=option_value, timeout=3000)
-            return f"Success: Selected option '{option_value}' in element {element_id}."
-        except Exception as e:
-            return f"Error: Failed to select option '{option_value}'. Details: {str(e)}"
+        pass
+
+    # Custom/React dropdown (e.g. react-select): open the menu, then click the option
+    try:
+        await locator.click(timeout=3000)
+        await asyncio.sleep(0.4)  # wait for the menu to render
+
+        # Deepest exact-text match first: clicking a child still bubbles up to
+        # the option's onClick. role/class based matches as fallbacks.
+        candidates = [
+            page.get_by_text(option_value, exact=True),
+            page.locator('[role="option"]', has_text=option_value),
+            page.locator('div[class*="option"]', has_text=option_value),
+        ]
+        for cand in candidates:
+            try:
+                await cand.first.click(timeout=2000)
+                return f"Success: Selected option '{option_value}' in element {element_id} (custom dropdown)."
+            except Exception:
+                continue
+
+        # Option not found: close the menu so the page isn't left in a weird state
+        await page.keyboard.press("Escape")
+        return f"Error: Option '{option_value}' not found in the open menu of element {element_id}."
+    except Exception as e:
+        return f"Error: Failed to select option '{option_value}'. Details: {str(e)}"
 
 
 async def set_slider(page: Page, element_id: int, value: str) -> str:

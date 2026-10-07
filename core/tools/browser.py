@@ -60,15 +60,19 @@ def send_browser_request(_action: str, **kwargs: Any) -> Any:
 @tool(
     description="""Gets the interactive Document Object Model (DOM) of the current active page.
 
+Please read as much of the DOM as possible. The start_character parameter should be used when checking for specific parts of the DOM for changes or when wanting to read a specific part of the DOM.
+
 Example:
-    `browser_get_dom()`
+    `browser_get_dom(character_limit=10000, start_character=50000)`
     Returns a string representation of the DOM with interactive elements tagged with their [ID].
+    It trims the first 50000 characters and then returns the next 10000 characters.
 """
 )
 def browser_get_dom(
     character_limit: int = tool_manager.get_config().browser_dom_char_limit,
+    start_character: int = 0,
 ) -> str:
-    return enforce_character_limit(send_browser_request(Action.DOM), character_limit)
+    return enforce_character_limit(send_browser_request(Action.DOM), character_limit, start=start_character)
 
 
 @tool(
@@ -144,6 +148,24 @@ Example:
     Other common keys: "Enter", "Tab", "ArrowDown", "ArrowUp".""")
 def browser_press_key(key: str) -> str:
     return send_browser_request(Action.PRESS_KEY, key=key)
+
+
+@tool(description="""Presses each key in the sequence in order on the active page.
+
+Each entry is a complete key press: a key name, or a combination joined with '+' such as "Control+e". Modifier names like "Control" alone do NOT combine with following entries.
+
+Examples:
+    `browser_press_keys(keys=["a", "b", "Enter"])` -> types a, b, then Enter.
+    `browser_press_keys(keys=["Control+a", "Delete"])` -> select all, then delete.
+    `browser_press_keys(keys=["ArrowDown", "ArrowDown", "Enter"])` -> navigate a menu and confirm.
+
+Presses are sent one by one and are not atomic: if an entry fails, earlier presses have already been applied. Stops at the first invalid key and reports its index and name.""")
+def browser_press_keys(keys: list[str]) -> str:
+    for i, key in enumerate(keys):
+        result: str = send_browser_request(Action.PRESS_KEY, key=key)
+        if result.startswith("Error"):
+            return f"Error pressing keys at index {i} the key '{key}':\n  {result}"
+    return "Successfully pressed all the keys."
 
 
 @tool(description="""Scrolls the active page up or down.
@@ -267,7 +289,7 @@ def browser_element_screenshot(element_id: int) -> Any:
 
 
 @tool(
-    description="""Selects an option in a combo box (<select> element) by label or value.
+    description="""Selects an option in a combo box. Works with native <select> elements and React custom dropdowns (e.g. react-select) in a single action.
 
 Example:
     `browser_select_option(element_id=9, option_value="United States")`
