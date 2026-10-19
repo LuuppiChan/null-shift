@@ -39,7 +39,7 @@ def get_run_command_schema() -> type[BaseModel]:
         programs=(
             list[CommandModel],
             Field(
-                description="List of commands to execute safely. Piping works by sequential order."
+                description="List of commands to pipe like in bash. Piping works by sequential order."
             ),
         ),
         timeout=(
@@ -94,7 +94,7 @@ def _run_command_safe(
     args_schema=get_run_command_schema(),
     description="""This tool allows running the given white listed CLI programs.
 This tool is NOT a common program execution tool, but a tool that gives you limited access to the user's system.
-This tool is annotated with the allowed programs and the programs are most commonly read-only.
+This tool is annotated with the allowed programs.
 
 To pipe input you must put list the programs in order.
 This does not use bash to execute the tools, but a secure system to check for the executed commands.

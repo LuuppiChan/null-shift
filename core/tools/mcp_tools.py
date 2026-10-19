@@ -88,5 +88,5 @@ def load_mcp_tools(server: str) -> list[StructuredTool]:
     return tools
 
 
-# for tool in load_mcp_tools("minecraft"):
+# for tool in load_mcp_tools("tool name"):
 #     globals()[tool.name] = tool

@@ -11,7 +11,10 @@ logger = logging.getLogger(__name__)
 @tool(description="""Run arbitrary python code inside an isolated container.
 It's recommended you write a file and then run if the script is long or needs to be used multiple times with changes made in between.
 Tip: Print the result to see it.
-**You cannot interact with the operating system with this tool meaning you cannot read external files.**""")
+**You cannot interact with the operating system with this tool meaning you cannot read external files.**
+
+Current environment has the following modules: numpy pandas requests scipy sympy pydantic matplotlib
+""")
 def python_container(code_or_path: str, timeout_seconds: float = 20.0) -> str:
     try:
         if Path(code_or_path).is_file():

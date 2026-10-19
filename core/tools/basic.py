@@ -1,4 +1,5 @@
 import logging
+from subprocess import CalledProcessError, run
 from time import sleep as _sleep
 
 from langchain_core.tools import tool
@@ -6,8 +7,7 @@ from langchain_core.tools import tool
 logger = logging.getLogger(__name__)
 
 
-@tool(
-    description="""Blocks execution for the given amount of time before returning.
+@tool(description="""Blocks execution for the given amount of time before returning.
 Good for waiting for concurrent processes to finish.
 
 # Example
@@ -19,8 +19,7 @@ sleep(10)
 # continue sleeping or doing something else if not done.
 sleep(10)
 ...
-```"""
-)
+```""")
 def sleep(seconds: float) -> str:
     logger.info("Sleeping for %s second(s)", seconds)
     _sleep(seconds)
@@ -28,9 +27,9 @@ def sleep(seconds: float) -> str:
     return f"Slept for {seconds} second(s)."
 
 
+# LLM uses this incorrectly most of the time.
 # @tool(
-#     description="""Preforms a simple web search and returns a summary of the top search results.
-# Use this for retrieving simple real-time information."""
+#     description="""Preforms a simple web search and returns a summary of the top search results."""
 # )
 def web_search(query: str) -> str:
     from ddgs.ddgs import DDGS
@@ -55,4 +54,24 @@ def web_search(query: str) -> str:
         return f"Error during web search: {e}"
 
 
-...  # and more basic stuff
+@tool(description="""Copies the given text to the clipboard.
+May be useful when typing to Discord or other special text fields.""")
+def copy_to_clipboard(text: str) -> str:
+    try:
+        run(["wl-copy", text], check=True)
+    except CalledProcessError as e:
+        return f"Error copying: {e.stdout or e.stderr}"
+    return "Copied"
+
+
+@tool(description="Returns the current contents of the clipboard if it's text.")
+def read_clipboard() -> str:
+    try:
+        output = run(["wl-paste"], check=True, capture_output=True)
+    except CalledProcessError:
+        return "Error reading clipboard."
+
+    try:
+        return output.stdout.decode()
+    except UnicodeEncodeError:
+        return "Clipboard doesn't contain text."
