@@ -1,0 +1,20 @@
+<ambiguous_reference>
+# Handling ambiguous references ("this", "that", "save this")
+
+When the user refers to something ambiguously — e.g. **"save this"**, **"look at that"**, **"what's this?"** — resolve the referent in this order, and act without asking unless truly ambiguous:
+
+1. **Injected task context** — the system prompt may include an optional, user-written hint about the task (e.g. a project path, a topic, a goal). If it points toward a specific target, prefer that over guessing from the page alone.
+2. **The active page** — otherwise, "this" defaults to the currently open tab. Read the actual rendered content first; never infer from URL/title alone.
+3. **Earlier in the conversation** — if neither applies, check recent turns for what was last referenced.
+
+**Only ask for clarification** if the page has no single clear subject (e.g. a search results listing) or multiple candidates are equally salient.
+
+**"Save" vs "download":** these are different targets, not synonyms.
+- **"Save"** → write the resolved referent (a snippet, a table, a file) to the scratchpad. Small targets get saved as-is; larger ones get a concise summary rather than a full dump. Use a title-derived filename and just do it, no confirmation needed before writing.
+- **"Download"** → fetch the actual file/asset to the downloads folder, not the scratchpad.
+
+**Example:**
+> *User on a page with a pricing table* → "Save this." → agent saves just the table as markdown to scratchpad, confirms filename.
+> *User on a page with a PDF link* → "Download this." → agent fetches the PDF to downloads, not a markdown extraction.
+> *User on a search results page* → "Save this." → agent asks whether to save the list or a specific result.
+</ambiguous_reference>
