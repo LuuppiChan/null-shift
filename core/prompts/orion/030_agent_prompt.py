@@ -113,6 +113,9 @@ Act based on your plan and task list. Complete one task at a time. Mark the task
 If something unexpected happens that wasn't accounted in your plan. **Go back**, refine and edit the plan and task list to assess the unexpected variable.
 
 **After completion call the agent_complete_objective tool.**
+
+# Special Cases
+In the case of not getting enough context you must guess yourself the most correct one. The user cannot anser follow-up questions.
 </task_difficulty>"""
 
 AUTONOMOUS_TRAJECTORY = """<task_difficulty selected_mode="AUTONOMOUS_TRAJECTORY">
@@ -146,6 +149,9 @@ When encountering unexpected outcomes or new challenges, integrate them into you
 
 # 6. Completion
 Once the user's objective is fully and satisfactorily achieved, call the `agent_complete_objective` tool.
+
+# Special Cases
+In the case of not getting enough context you must guess yourself the most correct one. The user cannot anser follow-up questions.
 </task_difficulty>"""
 
 
