@@ -5,9 +5,13 @@ def launch_tools():
     import multiprocessing
 
     from tools.browser.__main__ import run as run_browser
+    from tools.mcp.__main__ import run as run_mcp
 
     print("Starting tool processes...")
-    processes = [multiprocessing.Process(target=run_browser, name="BrowserTool")]
+    processes = [
+        multiprocessing.Process(target=run_browser, name="BrowserTool"),
+        multiprocessing.Process(target=run_mcp, name="McpTool"),
+    ]
 
     for p in processes:
         p.start()

@@ -16,3 +16,4 @@ tools.md
 /loop_bench/
 /plans/
 /tools/browser/browser_config.toml
+/tools/mcp/mcp_config.toml
