@@ -17,7 +17,7 @@ class OutputMessage(BaseModel):
     reasoning: str | None = None
     tool_name: str | None = None
     tool_call_id: str | None = None
-    tool_result: str | dict[str, Any] | list[dict[str, Any]] | list[str] | None = None
+    tool_result: str | list[str | dict[str, Any]] | None = None
     tool_args: dict[str, Any] | None = None
     stream_id: str | Literal["default"] = "default"
     event: Event | str | None = None

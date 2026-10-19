@@ -33,6 +33,9 @@ opencv-python
 ddgs
 playwright
 markdownify
+mcp
+# needs manual installation
+# git+https://projects.blender.org/lab/blender_mcp.git#subdirectory=mcp
 
 # cli text chat
 termcolor

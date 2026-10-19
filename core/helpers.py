@@ -177,7 +177,9 @@ def xml_tag(content: str | Any, tag: str, description: str = "") -> str:
     return f"<{tag}{f' description="{description}"' if description else ''}>\n{content}\n</{tag}>"
 
 
-def enforce_character_limit(text: str, limit: int | None = None, start: int | None = None) -> str:
+def enforce_character_limit(
+    text: str, limit: int | None = None, start: int | None = None
+) -> str:
     """
     Enforce character limit on text outputs.
     Optionally select the start character.
@@ -186,7 +188,7 @@ def enforce_character_limit(text: str, limit: int | None = None, start: int | No
     if limit is None:
         cfg = tool_manager.get_config()
         limit = cfg.file_absurd_size_limit
-    
+
     if start:
         if start >= 0:
             text = f"(Collapsed {start} characters) ..." + text[start:]
@@ -396,6 +398,10 @@ def get_permission(prompt: str) -> tuple[bool, str]:
     from global_types import BusMessage, MessageTopic, PendingPermissionRequest
 
     logger = logging.getLogger("get_permission")
+
+    cfg = manager.get_config().permissions
+    if cfg.auto_decline:
+        return False, cfg.auto_decline_message
 
     assert state.main_loop is not None
 

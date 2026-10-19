@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from pathlib import Path
 from typing import Any, Optional, cast
@@ -12,6 +13,7 @@ from langchain_core.messages import (
     ToolMessageChunk,
 )
 from langchain_core.tools import tool
+from openrouter.errors.badrequestresponse_error import BadRequestResponseError
 from pydantic import ValidationError
 
 from core.agent import AgentData, convert_difficulty, infer_difficulty
@@ -237,6 +239,11 @@ class Vector:
 
         i = 0
         retries = 0
+        cost = 0.0
+        input_tokens = 0
+        output_tokens = 0
+        cached_tokens = 0
+        reasoning_tokens = 0
 
         while True:
             config = manager.get_config()
@@ -259,12 +266,89 @@ class Vector:
             )
             try:
                 full_response = await self._process_llm_stream(tools)
+                if full_response is not None:
+                    request_cost = full_response.response_metadata.get("cost")
+
+                    if isinstance(request_cost, float):
+                        cost += request_cost
+                    else:
+                        logger.warning("Malformed request cost: %s", request_cost)
+
+                    if (usage_metadata := full_response.usage_metadata) is not None:
+                        request_input_tokens = usage_metadata.get("input_tokens")
+                        request_output_tokens = usage_metadata.get("output_tokens")
+                        input_token_details: dict | Any = usage_metadata.get(
+                            "input_token_details"
+                        )
+                        output_token_details: dict | Any = usage_metadata.get(
+                            "output_token_details"
+                        )
+                        if isinstance(request_input_tokens, int):
+                            input_tokens += request_input_tokens
+                        else:
+                            logger.warning(
+                                "Malformed request input tokens: %s",
+                                request_input_tokens,
+                            )
+
+                        if isinstance(request_output_tokens, int):
+                            output_tokens += request_output_tokens
+                        else:
+                            logger.warning(
+                                "Malformed request output tokens: %s",
+                                request_output_tokens,
+                            )
+
+                        if isinstance(input_token_details, dict):
+                            if isinstance(
+                                request_cached_tokens := input_token_details.get(
+                                    "cache_read", 0
+                                ),
+                                int,
+                            ):
+                                cached_tokens += request_cached_tokens
+                            else:
+                                logger.warning(
+                                    "Malformed cached_tokens: %s", request_cached_tokens
+                                )
+                        else:
+                            logger.warning(
+                                "Malformed input_token_details: %s", input_token_details
+                            )
+
+                        if isinstance(output_token_details, dict):
+                            if isinstance(
+                                request_reasoning_tokens := output_token_details.get(
+                                    "reasoning", 0
+                                ),
+                                int,
+                            ):
+                                reasoning_tokens += request_reasoning_tokens
+                            else:
+                                logger.warning(
+                                    "Malformed reasoning tokens: %s",
+                                    request_reasoning_tokens,
+                                )
+                        else:
+                            logger.warning(
+                                "Malformed output_token_details: %s",
+                                output_token_details,
+                            )
+
             except openai.BadRequestError as e:
                 # Code 400 I think, this means the user config is invalid.
                 logger.error("Bad request error: %s", e)
                 break
+            except BadRequestResponseError as e:
+                logger.error(
+                    "Openrouter status=%s message=%s body=%s",
+                    e.status_code,
+                    e.message,
+                    e.body,
+                )
+                break
             except Exception as e:
-                logger.error("Stream error: %s", e)
+                logger.exception("Stream error: %s", e)
                 logger.debug("Stream hisotory at error time: %s", self.history.messages)
                 retries += 1
                 logger.info("Stream retries: %s/%s", retries, config.stream.max_retries)
@@ -315,6 +399,16 @@ class Vector:
                         "Error finding message. Full content: %s", full_response.content
                     )
                 logger.info("LLM: %s", msg.strip())
+
+            logger.info("Total cost: %s", cost)
+            logger.info("Total input tokens: %s", input_tokens)
+            logger.info("Total output tokens: %s", output_tokens)
+            logger.info("Total cached tokens: %s", cached_tokens)
+            logger.info("Total reasoning tokens: %s", reasoning_tokens)
+            # to avoid zero division error
+            logger.info(
+                f"Cache hit: {cached_tokens / (input_tokens or 1) * 100.0:.2f}%"
+            )
 
             self.history.append(full_response)
             # Save and validate here because of the validation system
@@ -464,6 +558,18 @@ class Vector:
 
             await socket_out.send(out_msg.to_bus(MessageTopic.STREAM))
 
+        if full_response:
+            logger.info(
+                "Usage metadata: %s",
+                json.dumps(full_response.usage_metadata, ensure_ascii=False, indent=2),
+            )
+            logger.info(
+                "Response metadata: %s",
+                json.dumps(
+                    full_response.response_metadata, ensure_ascii=False, indent=2
+                ),
+            )
+
         # send full response
         out_msg = OutputMessage()
         if full_response is not None:
@@ -508,19 +614,26 @@ class Vector:
                 ).to_bus(MessageTopic.TOOL_CALL)
             )
 
-        results = []
+        results: list[ToolMessage] = []
 
         for tool_call in tool_calls:
             name = tool_call["name"]
             args = tool_call["args"]
             call_id = tool_call["id"]
 
+            logger.info("Calling tool: %s", name)
+            logger.debug("Tool call id: %s", call_id)
+            logger.debug("Tool arguments: %s", json.dumps(args, indent=2, ensure_ascii=False))
+
             @tool(name)
-            def inexistent(*args: Any, _name: str = name, **kwargs: Any) -> str:
+            def inexistent(
+                *args: Any,
+                _name: str = name,
+                _args: dict[str, Any] = args,
+                **kwargs: Any,
+            ) -> str:
                 """Inexistent tool placeholder."""
-                logger.warning(
-                    "LLM called tool %s with args %s and kwargs %s", _name, args, kwargs
-                )
+                logger.warning("LLM called tool %s with args %s", _name, _args)
                 return f"You tried to call an inexistent tool '{_name}'."
 
             func = tools.get(name, inexistent)
@@ -531,6 +644,21 @@ class Vector:
         # results = await asyncio.gather(*tasks)
 
         for result in results:
+            content = ""
+            if isinstance(result.content, str):
+                content = result.content
+            elif isinstance(result.content, list):
+                for block in result.content:
+                    if isinstance(block, dict):
+                        if block.get("type") == "text":
+                            content += block.get("text", "")
+                        else:
+                            logger.debug(
+                                "Tools has %s content type.", block.get("type")
+                            )
+                    elif isinstance(block, str):
+                        content += block
+            logger.debug("Tool content: %s", result.content)
             await socket_out.send(
                 OutputMessage(
                     tool_result=result.content,

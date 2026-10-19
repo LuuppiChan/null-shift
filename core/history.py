@@ -32,9 +32,35 @@ class History:
         self.last_compression: AIMessage | None = None
 
     def with_system_message(self, system_message: SystemMessage) -> list[BaseMessage]:
-        """Get the history with your system message."""
+        """Get the history with your system message and a cache breakpoint."""
         # Shallow list in python, cheap
-        return [system_message] + self.messages
+        messages = [system_message] + self.messages
+
+        cfg = manager.get_config()
+        cache_duration = cfg.get_model(cfg.llm.models.main).claude_cache_duration
+
+        if cache_duration and messages:
+            messages[-1] = copy.deepcopy(messages[-1])
+            last = messages[-1]
+
+            if isinstance(last.content, str):
+                last.content = [
+                    {
+                        "type": "text",
+                        "text": last.content,
+                        "cache_control": {
+                            "type": "ephemeral",
+                            "tll": cache_duration,
+                        },
+                    }
+                ]
+            elif isinstance(last.content, list):
+                for block in reversed(last.content):
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        block["cache_control"] = {"type": "ephemeral"}
+                        break
+
+        return messages
 
     def append(self, message: BaseMessage):
         """Append a message to the history."""
@@ -317,7 +343,8 @@ class History:
                 if cfg.history.compression_timeout is not None:
                     try:
                         summary = await asyncio.wait_for(
-                            self.summarize_history(popped_messages + self.messages), cfg.history.compression_timeout
+                            self.summarize_history(popped_messages + self.messages),
+                            cfg.history.compression_timeout,
                         )
                     except TimeoutError:
                         logger.warning("Summary timeout")

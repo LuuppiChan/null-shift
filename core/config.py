@@ -17,7 +17,6 @@ from global_types import Difficulty, PendingPermissionRequest
 logger = logging.getLogger(__name__)
 
 type ModelIdentifier = str | ModelInfo | None
-API_KEY_GLOBALS: dict[str, Any] = {}
 
 
 class ToolConfig(BaseModel):
@@ -116,6 +115,9 @@ class ModelInfo(BaseModel):
             "HTTP-Referer": "https://github.com/LuuppiChan/null-shift",
         }
     )
+    claude_cache_duration: str | Literal["", "5m", "1h"] = "5m"
+    api_key_globals: dict[str, Any] = Field(default_factory=dict)
+    inherits: str | list[str] | None = None
 
     def with_overrides(self, other: "ModelInfo") -> "ModelInfo":
         overrides = other.model_dump(
@@ -138,10 +140,10 @@ class ModelInfo(BaseModel):
             return None
         elif self.api_key.strip().startswith("# API_KEY <-"):
             try:
-                exec(self.api_key, API_KEY_GLOBALS)
-                return API_KEY_GLOBALS.get("API_KEY", None)
+                exec(self.api_key, self.api_key_globals)
+                return self.api_key_globals.get("API_KEY", None)
             except Exception as e:
-                logger.error("Error executing api key: %s", e)
+                logger.exception("Error executing api key: %s", e, stack_info=True)
                 return None
         else:
             return self.api_key
@@ -278,6 +280,8 @@ class PermissionsConfig(BaseModel):
         ]
     )
     timeout: float = 30.0
+    auto_decline: bool = False
+    auto_decline_message: str = "Access declined."
 
 
 class CoreConfig(BaseModel):
@@ -298,21 +302,36 @@ class CoreConfig(BaseModel):
     def get_model(self, identifier: ModelIdentifier) -> ModelInfo:
         """Get model based on identifier."""
         base = self.llm.default
-        if model := self.llm.model_tiers.get(self.llm.default.name):
-            base = model
 
-        if isinstance(identifier, ModelInfo):
-            if identifier.name in self.llm.model_tiers:
-                return base.with_overrides(
-                    self.llm.model_tiers[identifier.name]
-                )
-            return base.with_overrides(identifier)
-        elif identifier is None:
-            return base
-        elif model := self.llm.model_tiers.get(identifier):
-            return base.with_overrides(model)
+        if identifier is None:
+            identifier = base
 
-        return base.with_overrides(ModelInfo(name=identifier))
+        if isinstance(identifier, str):
+            if model := self.llm.model_tiers.get(identifier):
+                identifier = model
+            else:
+                identifier = base.with_overrides(ModelInfo(name=identifier))
+
+        # is ModelInfo
+
+        # None is handled automatically
+        inherits: list[str] = []
+        if isinstance(identifier.inherits, str):
+            inherits = [identifier.inherits]
+        elif isinstance(identifier.inherits, list):
+            inherits = identifier.inherits
+
+        parents: list[ModelInfo] = []
+        for parent in inherits:
+            if model := self.llm.model_tiers.get(parent):
+                parents.append(self.get_model(model))
+            else:
+                logger.error("Unknown llm parent dict: %s", parent)
+
+        for parent in reversed(parents):
+            identifier = parent.with_overrides(identifier)
+
+        return identifier
 
 
 class RuntimeState(BaseModel):
