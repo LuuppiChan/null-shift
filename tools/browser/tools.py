@@ -2,6 +2,7 @@
 # The tool definitions don't live here.
 import asyncio
 import base64
+from datetime import datetime
 from typing import Any
 
 import cv2
@@ -519,6 +520,23 @@ async def press_keyboard_key(page: Page, key: str) -> str:
         return f"Success: Pressed the '{key}' key."
     except Exception as e:
         return f"Error: Failed to press key '{key}'. Details: {str(e)}"
+
+
+async def press_keyboard_keys(page: Page, keys: list[str]) -> str:
+    """
+    Presses a specific keyboard key (e.g., 'Escape', 'Enter', 'Tab', 'ArrowDown').
+    """
+    press_delay = manager.get_config().typing_delay_ms / 1000
+    for key in keys:
+        try:
+            start = datetime.now()
+            await page.keyboard.press(key)
+            needs_wait = (datetime.now() - start).total_seconds() - press_delay
+            if needs_wait > 0:
+                await asyncio.sleep(needs_wait)
+        except Exception as e:
+            return f"Error: Failed to press key '{key}'. Details: {str(e)}"
+    return "Success: Pressed the keys."
 
 
 async def scroll_page(page: Page, direction: str = "down") -> str:

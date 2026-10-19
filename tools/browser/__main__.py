@@ -30,6 +30,7 @@ from tools.browser.tools import (
     hover_element,
     page_javascript,
     press_keyboard_key,
+    press_keyboard_keys,
     scroll_page,
     select_combo_option,
     set_slider,
@@ -246,6 +247,8 @@ class BrowserControl:
                         await self.send(await extract_attribute(page, **msg.kwargs))
                     case Action.PRESS_KEY:
                         await self.send(await press_keyboard_key(page, **msg.kwargs))
+                    case Action.PRESS_KEYS:
+                        await self.send(await press_keyboard_keys(page, **msg.kwargs))
                     case Action.SCROLL:
                         await self.send(await scroll_page(page, **msg.kwargs))
                     case Action.HOVER:

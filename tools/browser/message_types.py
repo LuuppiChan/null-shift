@@ -13,6 +13,7 @@ class Action(StrEnum):
     TYPE = "type"
     EXTRACT_ELEMENT = "extract_element"
     PRESS_KEY = "press_key"
+    PRESS_KEYS = "press_keys"
     SCROLL = "scroll"
     HOVER = "hover"
     MISC_ACTION = "misc_action"

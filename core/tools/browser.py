@@ -1,12 +1,13 @@
 import asyncio
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
+import regex
 import zmq
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 
-from core.helpers import ask_ai, enforce_character_limit
 from core.config import tool_manager
+from core.helpers import ask_ai, enforce_character_limit
 from global_types import BusMessage
 from tools.browser.message_types import Action
 
@@ -58,21 +59,67 @@ def send_browser_request(_action: str, **kwargs: Any) -> Any:
 
 
 @tool(
-    description="""Gets the interactive Document Object Model (DOM) of the current active page.
+    description="""Gets the interactive Document Object Model (DOM) of the current active page as if it was a file.
 
-Please read as much of the DOM as possible. The start_character parameter should be used when checking for specific parts of the DOM for changes or when wanting to read a specific part of the DOM.
-
-Example:
-    `browser_get_dom(character_limit=10000, start_character=50000)`
-    Returns a string representation of the DOM with interactive elements tagged with their [ID].
-    It trims the first 50000 characters and then returns the next 10000 characters.
+Arguments:
+    start_line: Optional line to start the read at. Starts at the first line if not specified. (1-indexed)
+    end_line: Optional line to end the read at. Reads to the end if not specified. (exclusive)
+    show_line_numbers: Show virtual line numbers.
+    character_limit: Limits the max character count. Most of the time doesn't need to be touched.
 """
 )
 def browser_get_dom(
+    start_line: int | None = None,
+    end_line: int | None = None,
+    show_line_numbers: bool = False,
     character_limit: int = tool_manager.get_config().browser_dom_char_limit,
-    start_character: int = 0,
 ) -> str:
-    return enforce_character_limit(send_browser_request(Action.DOM), character_limit, start=start_character)
+    dom: str = send_browser_request(Action.DOM)
+
+    lines = dom.splitlines()
+    length = len(lines)
+
+    if show_line_numbers:
+        lines = [f"{i + 1} {line}" for i, line in enumerate(lines)]
+
+    if end_line is None:
+        dom = "\n".join(lines[start_line:])
+    else:
+        dom = "\n".join(lines[start_line:end_line])
+
+    if not dom:
+        return f"Empty output. DOM has {length} line(s)."
+
+    return enforce_character_limit(dom, character_limit)
+
+
+@tool(
+    description="""Simple grep-like tool to find things from the DOM easier. Parameters map to grep equivalents. Matches are per-line only."""
+)
+def browser_grep_dom(
+    pattern: str,
+    ignore_case: bool = True,
+    after: int | None = None,
+    before: int | None = None,
+    context: int | None = None,
+) -> str:
+    compiled = regex.compile(pattern, regex.IGNORECASE if ignore_case else 0)
+    dom: str = send_browser_request(Action.DOM)
+
+    # these could be moved to the end, but eh
+    lines = [f"{i + 1} {line}" for i, line in enumerate(dom.splitlines())]
+    matches = [j for j, line in enumerate(lines) if compiled.search(line)]
+    context_lines = set()
+
+    before = context if context is not None else (after or 0)
+    after = context if context is not None else (before or 0)
+
+    for idx in matches:
+        context_lines.update(
+            range(max(0, idx - before), min(len(lines), idx + after + 1))
+        )
+
+    return "\n".join([lines[idx] for idx in sorted(context_lines)])
 
 
 @tool(
@@ -140,17 +187,18 @@ def browser_extract_attribute(element_id: int, attribute: str) -> str:
     )
 
 
-@tool(description="""Presses a specific keyboard key on the active page.
-
-Example:
-    `browser_press_key(key="Escape")`
-    Presses the ESC key (useful for closing modals).
-    Other common keys: "Enter", "Tab", "ArrowDown", "ArrowUp".""")
+# @tool(description="""Presses a specific keyboard key on the active page.
+#
+# Example:
+#     `browser_press_key(key="Escape")`
+#     Presses the ESC key (useful for closing modals).
+#     Other common keys: "Enter", "Tab", "ArrowDown", "ArrowUp".""")
 def browser_press_key(key: str) -> str:
     return send_browser_request(Action.PRESS_KEY, key=key)
 
 
-@tool(description="""Presses each key in the sequence in order on the active page.
+@tool(
+    description="""Presses each key in the sequence in order on the active page.
 
 Each entry is a complete key press: a key name, or a combination joined with '+' such as "Control+e". Modifier names like "Control" alone do NOT combine with following entries.
 
@@ -159,13 +207,10 @@ Examples:
     `browser_press_keys(keys=["Control+a", "Delete"])` -> select all, then delete.
     `browser_press_keys(keys=["ArrowDown", "ArrowDown", "Enter"])` -> navigate a menu and confirm.
 
-Presses are sent one by one and are not atomic: if an entry fails, earlier presses have already been applied. Stops at the first invalid key and reports its index and name.""")
+Presses are sent one by one and are not atomic: if an entry fails, earlier presses have already been applied. Stops at the first invalid key and reports its index and name."""
+)
 def browser_press_keys(keys: list[str]) -> str:
-    for i, key in enumerate(keys):
-        result: str = send_browser_request(Action.PRESS_KEY, key=key)
-        if result.startswith("Error"):
-            return f"Error pressing keys at index {i} the key '{key}':\n  {result}"
-    return "Successfully pressed all the keys."
+    return send_browser_request(Action.PRESS_KEYS, keys=keys)
 
 
 @tool(description="""Scrolls the active page up or down.
