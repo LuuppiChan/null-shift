@@ -22,6 +22,7 @@ from tools.browser.message_types import Action, BrowserMessage
 from tools.browser.tools import (
     click_element,
     control_video,
+    cursor_action,
     execute_misc_action,
     extract_attribute,
     fill_input,
@@ -163,6 +164,7 @@ class BrowserControl:
 
                 match msg.action:
                     case Action.LIST_TABS:
+                        # this is TabDict, but type checker doesn't like me sending so it stays as-is.
                         tabs: list[dict[str, int | bool | str]] = []
                         active = await self.active_page()
                         for i, p in enumerate(self.ctx.pages):
@@ -178,14 +180,7 @@ class BrowserControl:
                                     "active": p == active,
                                 }
                             )
-                        await self.send(
-                            "\n".join(
-                                [
-                                    f"[{tab['index']} (active: {tab['active']})]: {tab['title']} ({tab['url']})"
-                                    for tab in tabs
-                                ]
-                            )
-                        )
+                        await self.send(tabs)
                         continue
                     case Action.SWITCH_TAB:
                         idx = msg.kwargs.get("tab_index")
@@ -276,6 +271,8 @@ class BrowserControl:
                         await self.send(await select_combo_option(page, **msg.kwargs))
                     case Action.VIDEO_CONTROL:
                         await self.send(await control_video(page, **msg.kwargs))
+                    case Action.CURSOR_ACTION:
+                        await self.send(await cursor_action(page, **msg.kwargs))
 
             except PlaywrightError as e:
                 logger.error(f"Playwright error processing action {msg.action}: {e}")

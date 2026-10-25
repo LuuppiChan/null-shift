@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import regex
 import zmq
@@ -9,7 +9,7 @@ from langchain_core.tools import tool
 from core.config import tool_manager
 from core.helpers import ask_ai, enforce_character_limit
 from global_types import BusMessage
-from tools.browser.message_types import Action
+from tools.browser.message_types import Action, TabDict
 
 
 def send_browser_request(_action: str, **kwargs: Any) -> Any:
@@ -263,15 +263,20 @@ def browser_page_javascript(expression: str) -> str:
     return send_browser_request(Action.PAGE_JAVASCRIPT, expression=expression)
 
 
-@tool(
-    description="""Lists all currently open tabs with their index, title, url, and active state.
+def _browser_list_tabs() -> str:
+    return "\n".join(
+        [
+            f"[{tab['index']} (active: {tab['active']})]: {tab['title']} ({tab['url']})"
+            for tab in send_browser_request(Action.LIST_TABS)
+        ]
+    )
 
-Example:
-    `browser_list_tabs()`
-    Returns a list of dictionaries detailing the open tabs."""
+
+@tool(
+    description="""Lists all currently open tabs with their index, title, url, and active state."""
 )
-def browser_list_tabs() -> Any:
-    return send_browser_request(Action.LIST_TABS)
+def browser_list_tabs() -> str:
+    return _browser_list_tabs()
 
 
 @tool(description="""Switches the active browser focus to the tab at the given index.
@@ -283,13 +288,13 @@ def browser_switch_tab(tab_index: int) -> str:
     return send_browser_request(Action.SWITCH_TAB, tab_index=tab_index)
 
 
-@tool(description="""Closes the browser tab at the given index.
-
-Example:
-    `browser_close_tab(tab_index=2)`
-    Closes the third tab (index 2).""")
-def browser_close_tab(tab_index: int) -> str:
-    return send_browser_request(Action.CLOSE_TAB, tab_index=tab_index)
+@tool(description="""Closes the browser tab with the given index and url.""")
+def browser_close_tab(url: str, index: int) -> str:
+    tabs: list[TabDict] = send_browser_request(Action.LIST_TABS)
+    for i, tab in enumerate(tabs):
+        if url == tab["url"] and i == index:
+            return send_browser_request(Action.CLOSE_TAB, tab_index=tab["index"])
+    return f"Invalid pattern.\nAvailable tabs:\n{_browser_list_tabs()}"
 
 
 @tool(
@@ -299,7 +304,7 @@ Example:
     `browser_new_tab(url="https://example.com")`
     Creates a new tab and loads example.com."""
 )
-def browser_new_tab(url: Optional[str] = None) -> str:
+def browser_new_tab(url: str | None = None) -> str:
     return send_browser_request(Action.NEW_TAB, url=url)
 
 
@@ -355,8 +360,22 @@ Examples:
     `browser_video_control(element_id=4, action="seek", value=30.5)` -> Skips to 30.5 seconds."""
 )
 def browser_video_control(
-    element_id: int, action: str, value: Optional[float] = None
+    element_id: int, action: str, value: float | None = None
 ) -> str:
     return send_browser_request(
         Action.VIDEO_CONTROL, element_id=element_id, action=action, value=value
+    )
+
+
+@tool(
+    description="""Moves the visible agent cursor, clicks at viewport coordinates, or reports where it is. action="move" with element_id moves to that element; action="move" with x and y moves to viewport coordinates. action="click" with x and y moves to those coordinates and clicks there; use it only for targets not exposed in the DOM (e.g. canvas), otherwise prefer the element click tool. action="info" returns the cursor position and the element under it, which is useful for checking a target before clicking."""
+)
+def browser_cursor_action(
+    action: Literal["move", "click", "info"],
+    element_id: int | None = None,
+    x: float | None = None,
+    y: float | None = None,
+) -> Any:
+    return send_browser_request(
+        Action.CURSOR_ACTION, action=action, element_id=element_id, x=x, y=y
     )

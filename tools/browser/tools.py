@@ -2,12 +2,14 @@
 # The tool definitions don't live here.
 import asyncio
 import base64
+import weakref
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 import cv2
 import numpy as np
-from playwright.async_api import Page
+from playwright.async_api import Locator, Page
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from tools.browser.config import manager
 
@@ -399,23 +401,312 @@ async def page_javascript(page: Page, expression: str) -> str:
     return await page.evaluate(expression)
 
 
+# Cursor overlay: Playwright doesn't draw the OS cursor, so a fixed marker is
+# injected into the page and moved to wherever the tools act. Cosmetic only:
+# failures here are swallowed so they never break a tool action.
+
+CURSOR_JS: str = """
+() => {
+  // Recreate if an older overlay is left over without the show/hide helpers (e.g. after a server restart).
+  if (document.getElementById('__orion_cursor') && window.__orionShow) return false;
+  document.getElementById('__orion_cursor')?.remove();
+  const el = document.createElement('div');
+  el.id = '__orion_cursor';
+  el.setAttribute('aria-hidden', 'true');
+  Object.assign(el.style, {
+    position: 'fixed', left: '0px', top: '0px',
+    width: '18px', height: '18px',
+    marginLeft: '-9px', marginTop: '-9px',
+    borderRadius: '50%',
+    border: '2px solid #ff4d4d',
+    background: 'rgba(255, 77, 77, 0.3)',
+    boxSizing: 'border-box',
+    pointerEvents: 'none',
+    zIndex: '2147483647',
+    opacity: '0',
+    transform: 'scale(0.5)',
+  });
+  document.documentElement.appendChild(el);
+
+  // Runs one animation, then pins the element to finalStyle. Returns false if a newer
+  // animation cancelled this one; the newer call then owns the final state.
+  const run = async (frames, options, finalStyle) => {
+    el.getAnimations().forEach((a) => a.cancel());
+    const anim = el.animate(frames, { ...options, fill: 'forwards' });
+    try {
+      await anim.finished;
+    } catch (e) {
+      return false;
+    }
+    Object.assign(el.style, finalStyle);
+    anim.cancel();
+    return true;
+  };
+
+  window.__orionShow = async (opts) => {
+    const { fromX, fromY, toX, toY, idleMs, appearMs, glideMs, disappearMs } = opts;
+    clearTimeout(window.__orionCursorTimer);
+    if (window.__orionCursorVisible) {
+      // Already up: force full opacity so a glide that cancels a running appear can't leave it invisible.
+      Object.assign(el.style, { opacity: '1', transform: 'scale(1)' });
+    } else {
+      window.__orionCursorVisible = true;
+      el.style.left = fromX + 'px';
+      el.style.top = fromY + 'px';
+      const appeared = await run(
+        [{ opacity: '0', transform: 'scale(0.5)' }, { opacity: '1', transform: 'scale(1)' }],
+        { duration: appearMs, easing: 'ease-out' },
+        { opacity: '1', transform: 'scale(1)' }
+      );
+      if (!appeared) return false;
+    }
+    const cs = getComputedStyle(el);
+    const sx = parseFloat(cs.left);
+    const sy = parseFloat(cs.top);
+    if (Math.abs(sx - toX) > 0.5 || Math.abs(sy - toY) > 0.5) {
+      const glided = await run(
+        [{ left: sx + 'px', top: sy + 'px' }, { left: toX + 'px', top: toY + 'px' }],
+        { duration: glideMs, easing: 'ease-in-out' },
+        { left: toX + 'px', top: toY + 'px' }
+      );
+      if (!glided) return false;
+    }
+    if (idleMs !== null && idleMs !== undefined) {
+      window.__orionCursorTimer = setTimeout(() => window.__orionHide(disappearMs), idleMs);
+    }
+    return true;
+  };
+
+  window.__orionHide = async (disappearMs) => {
+    clearTimeout(window.__orionCursorTimer);
+    if (!window.__orionCursorVisible) return false;
+    window.__orionCursorVisible = false;
+    return run(
+      [{ opacity: '1', transform: 'scale(1)' }, { opacity: '0', transform: 'scale(0.6)' }],
+      { duration: disappearMs, easing: 'ease-in' },
+      { opacity: '0', transform: 'scale(0.6)' }
+    );
+  };
+  return true;
+}
+"""
+
+# Timings in milliseconds. The animations run in-page via the Web Animations API,
+# so Python never sleeps for them.
+CURSOR_VISIBLE_MS: int = 1500  # idle time before the overlay fades out
+CURSOR_APPEAR_MS: int = 150
+CURSOR_GLIDE_MS: int = 200
+CURSOR_DISAPPEAR_MS: int = 150
+
+SHOW_JS: str = "(opts) => window.__orionShow?.(opts)"
+HIDE_JS: str = "(ms) => window.__orionHide?.(ms)"
+
+PULSE_JS: str = """
+() => {
+  const el = document.getElementById('__orion_cursor');
+  if (!el) return;
+  el.animate(
+    [{ transform: 'scale(1)' }, { transform: 'scale(1.6)', opacity: 0.4 }, { transform: 'scale(1)' }],
+    { duration: 300 }
+  );
+}
+"""
+
+REMOVE_JS: str = "() => document.getElementById('__orion_cursor')?.remove()"
+
+INSPECT_JS: str = """
+([x, y]) => {
+  const target = document.elementFromPoint(x, y);
+  if (!target) return null;
+  const el = target.closest('[data-agent-id]') ?? target;
+  return {
+    tag: el.tagName.toLowerCase(),
+    agent_id: el.getAttribute('data-agent-id'),
+    text: (el.innerText || el.getAttribute('aria-label') || '').trim().slice(0, 80),
+  };
+}
+"""
+
+# Last known cursor position per page. Forgotten when the overlay is recreated
+# (i.e. after a navigation), so stale positions are never reported.
+_cursor_positions: weakref.WeakKeyDictionary[Page, tuple[float, float]] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+async def ensure_cursor(page: Page) -> None:
+    """Injects the overlay if missing. Forgets the old position if it had to recreate it."""
+    created: bool = await page.evaluate(CURSOR_JS)
+    if created:
+        _cursor_positions.pop(page, None)
+
+
+async def show_cursor(
+    page: Page, x: float, y: float, idle_ms: int | None = CURSOR_VISIBLE_MS
+) -> None:
+    """
+    Shows the overlay at viewport coordinates (x, y). If it's already placed on this
+    page, it glides from the last position. Pass idle_ms=None to keep it up until
+    hide_cursor is called. Never raises.
+    """
+    try:
+        await ensure_cursor(
+            page
+        )  # may forget the old position if it had to recreate the overlay
+        last: tuple[float, float] | None = _cursor_positions.get(page)
+        from_x, from_y = last if last is not None else (x, y)
+        await page.evaluate(
+            SHOW_JS,
+            {
+                "fromX": from_x,
+                "fromY": from_y,
+                "toX": x,
+                "toY": y,
+                "idleMs": idle_ms,
+                "appearMs": CURSOR_APPEAR_MS,
+                "glideMs": CURSOR_GLIDE_MS,
+                "disappearMs": CURSOR_DISAPPEAR_MS,
+            },
+        )
+        _cursor_positions[page] = (x, y)
+    except Exception:
+        pass
+
+
+async def hide_cursor(page: Page) -> None:
+    """Fades the overlay out. Never raises."""
+    try:
+        await page.evaluate(HIDE_JS, CURSOR_DISAPPEAR_MS)
+    except Exception:
+        pass
+
+
+async def move_cursor(page: Page, x: float, y: float) -> None:
+    """Moves the overlay to viewport coordinates (x, y) with the full appear/glide/idle sequence."""
+    await show_cursor(page, x, y)
+
+
+async def move_cursor_to_locator(page: Page, locator: Locator) -> None:
+    """Moves the overlay to the centre of an element's bounding box. Never raises."""
+    try:
+        box: dict[str, float] | None = await locator.bounding_box()
+        if box is None:
+            return
+        await move_cursor(
+            page, box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+        )
+    except Exception:
+        pass
+
+
+async def pulse_cursor(page: Page) -> None:
+    """Short visual pulse to mark a click. Never raises."""
+    try:
+        await page.evaluate(PULSE_JS)
+    except Exception:
+        pass
+
+
+async def remove_cursor(page: Page) -> None:
+    """Removes the overlay from the page. Never raises."""
+    try:
+        await page.evaluate(REMOVE_JS)
+    except Exception:
+        pass
+
+
+async def get_cursor_info(page: Page) -> dict[str, Any] | None:
+    """Returns the cursor position and the element under it, or None if unavailable."""
+    pos: tuple[float, float] | None = _cursor_positions.get(page)
+    if pos is None:
+        return None
+    x, y = pos
+    try:
+        element: dict[str, Any] | None = await page.evaluate(INSPECT_JS, [x, y])
+    except Exception:
+        return None
+    return {"x": round(x), "y": round(y), "element": element}
+
+
+def format_cursor_info(info: dict[str, Any] | None) -> str:
+    """One-line summary for tool results."""
+    if info is None:
+        return "Cursor: not placed yet."
+    el: dict[str, Any] | None = info["element"]
+    if el is None:
+        return f"Cursor at ({info['x']}, {info['y']}), no element under it."
+    agent: str = f" [{el['agent_id']}]" if el["agent_id"] else ""
+    label: str = f" '{el['text']}'" if el["text"] else ""
+    return f"Cursor at ({info['x']}, {info['y']}) over <{el['tag']}>{agent}{label}."
+
+
+async def cursor_action(
+    page: Page,
+    action: str | Literal["move", "click", "info"],
+    element_id: int | None = None,
+    x: float | None = None,
+    y: float | None = None,
+) -> str:
+    """
+    Moves the agent cursor overlay, clicks at viewport coordinates, or reports where it is.
+    action="move": moves to element_id (if given) or to viewport coordinates x, y.
+    action="click": moves to viewport coordinates x, y and clicks there. Use for targets that are not exposed in the DOM.
+    action="info": reports the cursor position and the element under it.
+    """
+    if action == "info":
+        return format_cursor_info(await get_cursor_info(page))
+    if action == "click":
+        if x is None or y is None:
+            return "Error: Click needs both x and y (viewport coordinates)."
+        await move_cursor(page, x, y)
+        # Capture what's under the cursor before clicking, so the result shows the real target.
+        before: str = format_cursor_info(await get_cursor_info(page))
+        try:
+            # Raw mouse event at the coordinate: works on elements that have no DOM ID (canvas, shadow DOM, etc.).
+            await page.mouse.click(x, y)
+        except Exception as e:
+            return f"Error: Could not click at ({x}, {y}). Details: {str(e)}"
+        await pulse_cursor(page)
+        return f"Success: Clicked at ({x}, {y}). {before}"
+    if action != "move":
+        return (
+            f"Error: Unknown cursor action '{action}'. Use 'move', 'click' or 'info'."
+        )
+    if element_id is not None:
+        try:
+            locator = await _get_locator(page, element_id)
+        except Exception as e:
+            return f"Error: Could not find element {element_id}. Details: {str(e)}"
+        await move_cursor_to_locator(page, locator)
+    elif x is not None and y is not None:
+        await move_cursor(page, x, y)
+    else:
+        return "Error: Move needs element_id or both x and y."
+    return f"Success: Cursor moved. {format_cursor_info(await get_cursor_info(page))}"
+
+
 async def click_element(page: Page, element_id: int) -> str:
     """
     Clicks an interactive element on the page using its ID.
     """
     locator = await _get_locator(page, element_id)
+    await move_cursor_to_locator(page, locator)
+    # Capture what's under the cursor before clicking, so the result shows the real target.
+    before: str = format_cursor_info(await get_cursor_info(page))
 
     try:
         # Standard click: waits for element to be visible, stable, and receive events.
         await locator.click(timeout=3000)
-        return f"Success: Clicked element {element_id}."
+        await pulse_cursor(page)
+        return f"Success: Clicked element {element_id}. {before}"
 
-    except TimeoutError:
+    except PlaywrightTimeoutError:
         try:
             # Fallback: Modern UIs often have invisible overlapping divs that block clicks.
             # force=True bypasses Playwright's actionability checks and clicks the exact X/Y coordinate.
             await locator.click(force=True, timeout=3000)
-            return f"Success: Force-clicked element {element_id} (standard click was blocked)."
+            await pulse_cursor(page)
+            return f"Success: Force-clicked element {element_id} (standard click was blocked). {before}"
         except Exception as e:
             return f"Error: Could not click element {element_id}. Details: {str(e)}"
     except Exception as e:
@@ -561,6 +852,7 @@ async def hover_element(page: Page, element_id: int) -> str:
     Hovers the mouse over an element. Useful for opening CSS-based dropdown menus.
     """
     locator = await _get_locator(page, element_id)
+    await move_cursor_to_locator(page, locator)
 
     try:
         await locator.hover(timeout=3000)
@@ -681,6 +973,17 @@ async def set_slider(page: Page, element_id: int, value: str) -> str:
 
 async def take_page_screenshot(page: Page) -> list[dict[str, Any]] | str:
     """Takes a screenshot of the entire page and returns it as a dict or error string."""
+    # Show the overlay at its last position with no idle timer, so it can't fade mid-capture
+    # on a slow full-page shot. It's hidden explicitly afterwards.
+    last: tuple[float, float] | None = None
+    try:
+        # Forgets the position if the overlay was recreated (e.g. after navigation).
+        await ensure_cursor(page)
+        last = _cursor_positions.get(page)
+    except Exception:
+        pass
+    if last is not None:
+        await show_cursor(page, last[0], last[1], idle_ms=None)
     try:
         screenshot_bytes = await page.screenshot(
             type="jpeg", quality=80, full_page=True
@@ -695,6 +998,9 @@ async def take_page_screenshot(page: Page) -> list[dict[str, Any]] | str:
         ]
     except Exception as e:
         return f"Error: Failed to take page screenshot. Details: {str(e)}"
+    finally:
+        if last is not None:
+            await hide_cursor(page)
 
 
 async def take_element_screenshot(

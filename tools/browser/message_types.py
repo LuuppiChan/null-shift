@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Any, Optional, cast
+from typing import Any, Optional, TypedDict, cast
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,7 @@ class Action(StrEnum):
     SELECT_OPTION = "select_option"
     VIDEO_CONTROL = "video_control"
     PAGE_JAVASCRIPT = "page_javascript"
+    CURSOR_ACTION = "cursor_action"
 
 
 class BrowserMessage(BaseModel):
@@ -39,3 +40,18 @@ class BrowserMessage(BaseModel):
         if msg.topic in Action:
             return cls(action=cast(Action, msg.topic), kwargs=msg.payload)
         return None
+
+
+class TabDict(TypedDict):
+    """
+    Thing that LIST_TABS gives.
+
+    index: int
+    title: str
+    url: str
+    active: bool
+    """
+    index: int
+    title: str
+    url: str
+    active: bool
