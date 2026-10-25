@@ -1,26 +1,33 @@
-import logging
-from pathlib import Path
-import subprocess
 import json
+import logging
+import subprocess
+from pathlib import Path
 
 from langchain_core.tools import tool
+
+from core.config import tool_manager
 
 logger = logging.getLogger(__name__)
 
 
 @tool(description="""Run arbitrary python code inside an isolated container.
-It's recommended you write a file and then run if the script is long or needs to be used multiple times with changes made in between.
-Tip: Print the result to see it.
-**You cannot interact with the operating system with this tool meaning you cannot read external files.**
 
-Current environment has the following modules: numpy pandas requests scipy sympy pydantic matplotlib
-""")
+Your code runs under the following working directory: `/home/agentuser`.
+You can access the host's scratchpad directory. It's mounted under: `/home/agentuser/scratchpad`. You can change to it with `os.chdir("/home/agentuser/scratchpad")` each call.
+
+Current environment has the following modules: numpy pandas requests scipy sympy pydantic matplotlib""")
 def python_container(code_or_path: str, timeout_seconds: float = 20.0) -> str:
     try:
         if Path(code_or_path).is_file():
             code_or_path = Path(code_or_path).read_text()
     except Exception as e:
-        logger.warning("Error while making a path: %s", e)
+        logger.warning("Tool Error: Error while making a path: %s", e)
+
+    scratchpad = str(
+        Path(tool_manager.get_config().dynamic_scratchpad_path)
+        .expanduser()
+        .resolve(True)
+    )
 
     podman_cmd: list[str] = [
         "podman",
@@ -28,6 +35,10 @@ def python_container(code_or_path: str, timeout_seconds: float = 20.0) -> str:
         "--rm",
         # "--network",
         # "none",
+        "--userns=keep-id",
+        # Scratchpad (Desktop) mounted read-write; :z sets the SELinux label on Fedora
+        "-v",
+        f"{scratchpad}:/home/agentuser/scratchpad:z",
         "--memory",
         "512m",
         "--cpus",
