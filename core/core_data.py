@@ -5,7 +5,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -20,7 +20,7 @@ class Data:
 
     @staticmethod
     def datetime() -> str:
-        return datetime.now().strftime("%H:%M:%S on %A, %d %B, %Y")
+        return datetime.now().astimezone().strftime("%H:%M:%S on %A, %d %B, %Y (%:z %Z)")
 
     @staticmethod
     def home_path() -> Path:
@@ -118,6 +118,7 @@ class LocalData(BaseModel):
     Contains data about the current stream and a reference to the global data.
     """
 
+    # just in case global data is arbitrary
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     history: collections.deque[BaseMessage] = Field(
