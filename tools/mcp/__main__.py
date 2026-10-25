@@ -10,6 +10,7 @@ import zmq.asyncio
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
+from mcp.types import CallToolResult, ContentBlock, TextContent
 
 from global_types import BusMessage
 from tools.mcp.config import ServerConfig, manager
@@ -95,10 +96,20 @@ class MCPSession:
             logger.error("Trying to call session that's None on server '%s'", self.name)
             return []
 
+        timeout = manager.get_config().call_timeout_s
+
         try:
             result = await asyncio.wait_for(
                 self.session.call_tool(tool_name, kwargs),
-                timeout=manager.get_config().call_timeout_s,
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            result = CallToolResult(
+                content=[
+                    TextContent(
+                        type="text", text=f"Result timed out after {timeout} seconds."
+                    )
+                ]
             )
         except Exception:
             # Transport died or hung: drop the session so the next call reconnects.
@@ -188,7 +199,9 @@ def render_content(content_items: list) -> str:
             ext = (item.mimeType or "image/png").split("/")[-1]
             path = image_dir / f"{item.__class__.__name__.lower()}_{i}.{ext}"
             path.write_bytes(base64.b64decode(item.data))
-            parts.append(f"[image ({item.mimeType}) saved to `{path}`. View it with the file read tool.]")
+            parts.append(
+                f"[image ({item.mimeType}) saved to `{path}`. View it with the file read tool.]"
+            )
         else:
             parts.append(str(item))
     return "\n".join(parts) if parts else "OK (no content returned)."
