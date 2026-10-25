@@ -20,7 +20,7 @@ class Action(StrEnum):
 # Must cover the server's init_timeout_s (fresh daemon spawns the MCP
 # subprocess on the first LIST_TOOLS) and call_timeout_s plus headroom.
 LIST_TIMEOUT_MS = 60_000
-CALL_TIMEOUT_MS = 180_000
+CALL_TIMEOUT_MS = 300_000
 
 _SOCKET_ADDRESS = "tcp://127.0.0.1:5558"
 
@@ -56,6 +56,8 @@ def send_mcp_request(action: str, timeout_ms: int, **payload: Any) -> Any:
         if response is None:
             raise ValueError("Failed to decode BusMessage response from the MCP tool.")
         return response.payload.get("result")
+    except zmq.Again:
+        return f"Response timed out after {timeout_ms} ms"
     finally:
         socket.close()
         ctx.destroy()
@@ -88,5 +90,5 @@ def load_mcp_tools(server: str) -> list[StructuredTool]:
     return tools
 
 
-# for tool in load_mcp_tools("tool name"):
+# for tool in load_mcp_tools("rea"):
 #     globals()[tool.name] = tool
