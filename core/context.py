@@ -1,3 +1,8 @@
+"""
+This is for system prompt.
+Dynamic context is for the current message.
+"""
+
 import asyncio
 import hashlib
 import importlib.util
