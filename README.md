@@ -1,6 +1,6 @@
 # Null Shift
 
-> **Note:** This project is currently in active development.
+> **Note:** This is a personal project.
 
 Just another agent harness. This one focuses on hands free computer usage with tools for file and browser interaction.
 
@@ -13,7 +13,7 @@ Just another agent harness. This one focuses on hands free computer usage with t
 ### Setup & Run
 
 #### Linux
-Run these commands
+Run these commands (and possibly some debugging)
 ```bash
 # clone the repository
 git clone https://github.com/LuuppiChan/null-shift.git
