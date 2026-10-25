@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-from pathlib import Path
 from typing import Any, Optional, cast
 
 import openai
@@ -10,13 +9,12 @@ from langchain_core.messages import (
     HumanMessage,
     ToolCall,
     ToolMessage,
-    ToolMessageChunk,
 )
 from langchain_core.tools import tool
 from openrouter.errors.badrequestresponse_error import BadRequestResponseError
 from pydantic import ValidationError
 
-from core.agent import AgentData, convert_difficulty, infer_difficulty
+from core.agent import convert_difficulty, infer_difficulty
 from core.backends import LLMBackend, get_backend
 from core.config import manager, state
 from core.context import get_context
@@ -54,14 +52,18 @@ class Vector:
         self.message_queue: asyncio.Queue[InputMessage] = asyncio.Queue()
         self.history = History()
         self.batch: list[InputMessage] = []
+        self.cancelled_messages: list[str] = []
+        self.messages_in_queue: list[str] = []
+        """To see whether we even have the input message with that id."""
         self.data: LocalData = LocalData()
         self.history.added.connect(self.data._add_history)
         self.abort: Signal = Signal()
         self.abort.connect(self._on_abort)
 
-    def _on_abort(self):
+    def _on_abort(self) -> None:
         logger.info("Abort triggered!")
         logger.info("Passing through the abort message.")
+        state.is_running = False
         asyncio.create_task(socket_out.send(BusMessage(topic=MessageTopic.ABORT)))
         logger.info("Clearing message queue due to abort.")
         while not self.message_queue.empty():
@@ -72,7 +74,7 @@ class Vector:
             except asyncio.QueueEmpty:
                 break
 
-    async def consumer_loop(self):
+    async def consumer_loop(self) -> None:
         """Handles input queue messages and passes them to the process_input."""
         while not state.shutdown_event.is_set():
             try:
@@ -83,12 +85,32 @@ class Vector:
 
             await self.process_input(message)
 
-    async def message_loop(self):
+    async def message_loop(self) -> None:
         """Handles messages in the message_queue one by one."""
         while not state.shutdown_event.is_set():
             try:
                 message = await asyncio.wait_for(self.message_queue.get(), timeout=0.1)
             except asyncio.TimeoutError:
+                if self.message_queue.empty():
+                    # to prevent memory leaks from other bad code
+                    self.messages_in_queue.clear()
+                    self.cancelled_messages.clear()
+                continue
+
+            if message.id in self.messages_in_queue:
+                self.messages_in_queue.remove(message.id)
+            else:
+                logger.warning(
+                    "Invalid state. Message that was in the queue, was not in the queue id list. %s",
+                    message,
+                )
+
+            if message.id in self.cancelled_messages:
+                logger.info("Found cancelled message. '%s'", message.id)
+                try:
+                    self.cancelled_messages.remove(message.id)
+                except ValueError as e:
+                    logger.warning("Invalid state. Message id not in ids: %s", e)
                 continue
 
             await socket_out.send(BusMessage(topic=MessageTopic.STARTED))
@@ -115,17 +137,17 @@ class Vector:
                             exc_info=True,
                         )
                 except Exception as e:
-                    logger.error(
+                    logger.critical(
                         "Stream returned an exception: %s",
                         e,
                         stack_info=True,
                         exc_info=True,
                     )
 
-            await socket_out.send(BusMessage(topic=MessageTopic.FINISHED))
             state.is_running = False
+            await socket_out.send(BusMessage(topic=MessageTopic.FINISHED))
 
-    async def process_input(self, message: BusMessage):
+    async def process_input(self, message: BusMessage) -> None:
         """Takes in a raw BusMessage and processes it accordingly."""
         topic = message.topic.split(".")
         if topic[0] == MessageTopic.INPUT:
@@ -179,8 +201,10 @@ class Vector:
                 )
                 self.batch.append(message)
             case MessageType.INSTANT:
+                self.messages_in_queue.append(message.id)
                 logger.info(
-                    "Adding message to queue: %s",
+                    "Adding message to queue (%s): %s",
+                    message.id,
                     (
                         message.title
                         if message.title
@@ -205,16 +229,10 @@ class Vector:
         config = manager.get_config()
 
         content: list[str | dict[Any, Any]] = []
-        formatted = []
 
+        self.data.current_turn = HumanMessage
         dyn_ctx = await get_dynamic_context(self.data)
-        if dyn_ctx is not None:
-            formatted.append(dyn_ctx)
-
-        if message.title:
-            formatted.append("# " + message.title)
-        formatted.append(message.body)
-        text = "\n".join(formatted)
+        text = message.build(dyn_ctx)
         content.append({"type": "text", "text": text})
 
         if message.media:
@@ -455,6 +473,7 @@ class Vector:
         cfg = manager.get_config()
         model = cfg.get_model(cfg.llm.models.main)
         self.llm = get_backend(model)
+        self.data.current_turn = None
         context = await get_context(self.data)
         logger.info(
             "Running with system prompt with a length of %s", len(context.content)
@@ -605,6 +624,9 @@ class Vector:
         self, tools: dict[str, LLMTool], tool_calls: list[ToolCall]
     ) -> list[ToolMessage]:
         logger.info("LLM requested %s tool(s)", len(tool_calls))
+
+        results: list[ToolMessage] = []
+
         for tool_call in tool_calls:
             await socket_out.send(
                 OutputMessage(
@@ -614,16 +636,15 @@ class Vector:
                 ).to_bus(MessageTopic.TOOL_CALL)
             )
 
-        results: list[ToolMessage] = []
-
-        for tool_call in tool_calls:
             name = tool_call["name"]
             args = tool_call["args"]
             call_id = tool_call["id"]
 
             logger.info("Calling tool: %s", name)
             logger.debug("Tool call id: %s", call_id)
-            logger.debug("Tool arguments: %s", json.dumps(args, indent=2, ensure_ascii=False))
+            logger.debug(
+                "Tool arguments: %s", json.dumps(args, indent=2, ensure_ascii=False)
+            )
 
             @tool(name)
             def inexistent(
@@ -638,16 +659,62 @@ class Vector:
 
             func = tools.get(name, inexistent)
 
-            results.append(await self._handle_single_tool(func, args, call_id))
+            result = await self._handle_single_tool(func, args, call_id)
+            results.append(result)
 
-        # Before there were mulithreading, but for now I'll disable it because it doesn't bring that many benefits compared to the disadvantages it gives with model hallucination.
-        # results = await asyncio.gather(*tasks)
+            # Before there were mulithreading, but for now I'll disable it because it doesn't bring that many benefits compared to the disadvantages it gives with model hallucination.
+            # results = await asyncio.gather(*tasks)
 
-        for result in results:
+            # user message injection here
+            # tool context is ran after the tool for a reason.
+            self.data.current_turn = ToolMessage
+            context = await get_dynamic_context(self.data)
+            try:
+                # stealing the messages from the message queue muhahahahahahaa
+                # only quirk is that the prompts aren't getting updated based on the input message at least for now.
+                user_message = self.message_queue.get_nowait()
+                if user_message.id in self.cancelled_messages:
+                    logger.info(
+                        "Message '%s' was cancelled, not sending.", user_message.id
+                    )
+                    logger.debug("Full message: %s", user_message)
+                    self.cancelled_messages.remove(user_message.id)
+                    # too lazy to catch invalid sate
+                    self.messages_in_queue.remove(user_message.id)
+                    user_message = None
+
+            except asyncio.QueueEmpty:
+                user_message = None
+
             content = ""
             if isinstance(result.content, str):
+                if context:
+                    result.content += "\n\n" + context
+                if user_message is not None:
+                    result.content += "\n\nUser:\n" + user_message.build()
+
                 content = result.content
             elif isinstance(result.content, list):
+                if all(isinstance(block, str) for block in result.content):
+                    if context:
+                        result.content.append("\n\n" + context)
+
+                    if user_message is not None:
+                        assert isinstance(result.content[-1], str)
+                        result.content[-1] += (
+                            "\n\nUser (you should acknowledge this immediately):\n"
+                            + user_message.build()
+                        )
+                else:  # either when all are dicts or all aren't dicts
+                    if context:
+                        result.content.append({"type": "text", "text": context})
+
+                    if user_message is not None:
+                        assert isinstance(result.content[-1], dict)
+                        result.content.append(
+                            {"type": "text", "text": "User:\n" + user_message.build()}
+                        )
+
                 for block in result.content:
                     if isinstance(block, dict):
                         if block.get("type") == "text":
@@ -737,6 +804,20 @@ class Vector:
                         payload=command_response(is_running=state.is_running),
                     )
                 )
+            case Commands.CANCEL_MESSAGE:
+                if not command.args:
+                    logger.error(
+                        "Malformed command. CANCEL_MESSAGE needs message id as the first argument."
+                    )
+                id = command.args[0]
+                logger.info("Cancelling message with id '%s'", id)
+                if id not in self.messages_in_queue:
+                    logger.warning(
+                        "Message with the id of '%s' cannot be cancelled.", id
+                    )
+                    return
+
+                self.cancelled_messages.append(id)
             case _:
                 logger.warning("Invalid command: %s", command.command)
 

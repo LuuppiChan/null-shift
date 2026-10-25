@@ -124,9 +124,11 @@ class LocalData(BaseModel):
     history: collections.deque[BaseMessage] = Field(
         default_factory=lambda: collections.deque(maxlen=1000)
     )
-
-    # just in case global data is arbitrary
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    current_turn: type[HumanMessage | ToolMessage] | None = HumanMessage
+    """
+    This contains the current message the output will be attached to if any.
+    This is useful to know where to attach context.
+    """
 
     global_data: Data = data
     agent: AgentData = Field(default_factory=AgentData)

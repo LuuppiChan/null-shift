@@ -6,13 +6,14 @@ import asyncio
 import json
 import logging
 import multiprocessing
+import uuid
 from asyncio import Task, sleep
+from collections.abc import Callable, Iterable
 from datetime import datetime, timedelta
 from enum import StrEnum
 from multiprocessing.connection import Connection, Pipe
 from pathlib import Path
-from typing import Any, Callable, Iterable, Optional, Self, cast
-import uuid
+from typing import Any, Self, cast
 
 from pydantic import BaseModel, Field
 
@@ -43,6 +44,7 @@ class Commands(StrEnum):
     FLUSH_BATCH = "flush_batch"
     ABORT = "abort"
     IS_RUNNING = "is_running"
+    CANCEL_MESSAGE = "cancel_message"
 
 
 class Difficulty(StrEnum):
@@ -96,24 +98,42 @@ class InputMessage(BaseModel):
     """Typed input message"""
 
     type: str = "instant"
-    title: Optional[str] = None
+    title: str | None = None
     body: str
-    media: Optional[list[dict[str, str]]] = None
-    difficulty: Optional[Difficulty] = None
-    goal: Optional[str] = None
-    context: Optional[str] = None
+    media: list[dict[str, str]] | None = None
+    difficulty: Difficulty | None = None
+    goal: str | None = None
+    context: str | None = None
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    """Id to use when cancelling the message."""
 
     def to_bus(self, topic: MessageTopic = MessageTopic.INPUT) -> BusMessage:
         return BusMessage(
             topic=topic,
-            payload=self.model_dump(
-                exclude_defaults=True, exclude_unset=True, exclude_none=True
-            ),
+            payload={
+                "id": self.id,
+                **self.model_dump(
+                    exclude_defaults=True, exclude_unset=True, exclude_none=True
+                ),
+            },
         )
+
+    def build(self, dynamic_context: str | None = None) -> str:
+        """Build the input message."""
+        formatted = []
+
+        if dynamic_context is not None:
+            formatted.append(dynamic_context)
+
+        if self.title:
+            formatted.append("# " + self.title)
+        formatted.append(self.body)
+        text = "\n".join(formatted)
+        return text
 
 
 class InputCommand(BaseModel):
-    """Typed command message"""
+    """Typed command message."""
 
     command: str
     args: list[Any] = Field(default_factory=list)
@@ -155,7 +175,7 @@ class CachedFile:
         new_mtime = self.file.stat().st_mtime
         return new_mtime != self.mtime
 
-    def get_contents(self) -> Optional[str]:
+    def get_contents(self) -> str | None:
         """
         Retrieves this file's content.
 
@@ -204,16 +224,7 @@ def convert_to_langchain_media(
                     "image_url": {"url": f"data:{mtype};base64,{data}"},
                 }
             )
-        elif mtype.startswith("video/"):
-            content.append(
-                {
-                    "type": "file",
-                    "source_type": "base64",
-                    "data": data,
-                    "mime_type": mtype,
-                }
-            )
-        elif mtype.startswith("audio/"):
+        elif mtype.startswith("video/") or mtype.startswith("audio/"):
             content.append(
                 {
                     "type": "file",
@@ -230,14 +241,14 @@ def convert_to_langchain_media(
 
 async def run_batch_ordered[T](
     functions: Iterable[Callable[[], T]], timeout: float = 1.0
-) -> list[Optional[T]]:
+) -> list[T | None]:
     """
     Runs a batch of functions on another threads and returns their result.
     Timeout only means it returns when the given time reaches.
     Some processes may still linger as zombies if they hang.
     But they will at some point end unless they're stuck on an infinite loop.
     """
-    results: list[Optional[T]] = []
+    results: list[T | None] = []
 
     tasks: list[Task[T]] = []
     for func in functions:
@@ -277,13 +288,13 @@ async def run_batch_ordered[T](
 
 async def run_killables[T](
     functions: Iterable[Callable[[], T]], timeout: float = 1.0
-) -> list[Optional[T]]:
+) -> list[T | None]:
     """
     Runs a batch of blocking tasks with a timeout.
     Returns the results in the same order as the task list.
     Result can either be the function result or None if it timed out or raised an exception.
     """
-    tasks: list[Task[Optional[T]]] = []
+    tasks: list[Task[T | None]] = []
     for fn in functions:
         tasks.append(asyncio.create_task(run_killable(fn, timeout)))
 
@@ -296,7 +307,7 @@ async def run_killables[T](
 async def run_killable[T](
     function: Callable[[], T],
     timeout: float = 1.0,
-) -> Optional[T]:
+) -> T | None:
     """
     Runs a blocking function on a separate thread.
     Returns the result of this function.
