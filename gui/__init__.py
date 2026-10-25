@@ -27,6 +27,7 @@ from global_types import (
     BusMessage,
     Commands,
     Difficulty,
+    InputCommand,
     InputMessage,
     MessageTopic,
     PendingPermissionRequest,
@@ -330,6 +331,7 @@ class Message(ft.Container):
         )
         self.is_ai: bool = False
         self.is_tool: bool = False
+        self.message_id: str | None = None
         self.tool_name: str = ""
         self.tool_id: str = ""
         self.thought_markdown = good_markdown(visible=False)
@@ -529,9 +531,7 @@ class Message(ft.Container):
         cfg = manager.get_config()
         msg = Message()
         msg.thoughts.title = f"Tool call: `{name}`"
-        msg.thoughts.tooltip = (
-            f"Arguments:\njson\n{json.dumps(args, indent=4, ensure_ascii=False)[-cfg.tooltip_len :]}\n"
-        )
+        msg.thoughts.tooltip = f"Arguments:\njson\n{json.dumps(args, indent=4, ensure_ascii=False)[-cfg.tooltip_len :]}\n"
         msg.thoughts.visible = True
         msg.tool_call.value = f"**Tool Name:** {name}\n\n**Arguments:**\n```json\n{json.dumps(args, indent=2, ensure_ascii=False)}\n```"
         msg.tool_call.visible = True
@@ -774,6 +774,24 @@ class Chat(ft.Container):
                             )
                         case _:
                             self.add_message(Message.user(f"Unknown argument '{arg}'"))
+                case "/c" | "/cancel":
+                    msg = self.last_real_user()
+                    if msg is not None:
+                        self.messages.controls.remove(msg)
+                        text = msg.text.value
+                        id = msg.message_id
+                        await sock_in.send_multipart(
+                            BusMessage(
+                                topic=MessageTopic.COMMAND,
+                                payload=InputCommand(
+                                    command=Commands.CANCEL_MESSAGE, args=[id]
+                                ).model_dump(),
+                            ).encoded()
+                        )
+                        self.input.input.value = text
+                        self.input.text_changed()
+                        self.update()
+                        return
                 case _:
                     self.add_message(Message.user(f"Unknown command: '{command}'"))
             self.input.input.value = ""
@@ -781,45 +799,47 @@ class Chat(ft.Container):
             self.update()
             return
 
-        if self.finished:
-            cfg = manager.get_config()
-            self.finished = False
-            self.input.input.value = ""
-            self.input.text_changed()
-            self.add_message(Message.user(text))
-            c = self.settings.config
-            options = {k: v.selected for k, v in c.items() if v.selected}
-            options["body"] = text
-            context = str(options.get("context", ""))
+        # Finished check removed since core can actually receive messages while streaming.
+        # Now it will inject them to the tool output.
+        cfg = manager.get_config()
+        self.finished = False
+        self.input.input.value = ""
+        self.input.text_changed()
+        message = Message.user(text)
+        self.add_message(message)
+        c = self.settings.config
+        options = {k: v.selected for k, v in c.items() if v.selected}
+        options["body"] = text
+        context = str(options.get("context", ""))
 
-            if cfg.voice.context_injection and self.input.transcriber.running:
-                context += "\n\n" + cfg.voice.context_injection
-            if cfg.speak.context_injection and (
-                (cfg.speak.with_stt and self.input.transcriber.running)
-                or (cfg.speak.always)
-            ):
-                context += "\n\n" + cfg.speak.context_injection
+        if cfg.voice.context_injection and self.input.transcriber.running:
+            context += "\n\n" + cfg.voice.context_injection
+        if cfg.speak.context_injection and (
+            (cfg.speak.with_stt and self.input.transcriber.running)
+            or (cfg.speak.always)
+        ):
+            context += "\n\n" + cfg.speak.context_injection
 
-            options["context"] = context.strip()
-            if not options["context"]:
-                del options["context"]
+        options["context"] = context.strip()
+        if not options["context"]:
+            del options["context"]
 
-            logger.info("%s", json.dumps(options, indent=2, ensure_ascii=False))
+        logger.info("%s", json.dumps(options, indent=2, ensure_ascii=False))
 
-            if self.streaming and self.input.transcriber.running:
-                await sock_in.send_multipart(
-                    BusMessage(
-                        topic=MessageTopic.COMMAND,
-                        payload={"command": Commands.ABORT},
-                    ).encoded()
-                )
-            self.update()
+        if self.streaming and self.input.transcriber.running:
             await sock_in.send_multipart(
-                InputMessage.model_validate(options).to_bus().encoded()
+                BusMessage(
+                    topic=MessageTopic.COMMAND,
+                    payload={"command": Commands.ABORT},
+                ).encoded()
             )
-            cfg = manager.get_config()
-            if cfg.speak.audio_feedback and self.speaking_enabled():
-                self.tts.put_stream("Message sent. ")
+        self.update()
+        input_message = InputMessage.model_validate(options)
+        message.message_id = input_message.id
+        await sock_in.send_multipart(input_message.to_bus().encoded())
+        cfg = manager.get_config()
+        if cfg.speak.audio_feedback and self.speaking_enabled():
+            self.tts.put_stream("Message sent. ")
 
     def speaking_enabled(self) -> bool:
         cfg = manager.get_config()
@@ -931,6 +951,13 @@ class Chat(ft.Container):
                     logger.error("Error while listening: %s", e, exc_info=True)
         except asyncio.CancelledError:
             logger.info("Shutting down listener.")
+
+    def last_real_user(self) -> Message | None:
+        """Gets the last sent user message."""
+        for message in reversed(self.messages.controls):
+            if isinstance(message, Message) and message.message_id:
+                return message
+        return None
 
     def add_message(self, message: Message):
         message.chat = self
